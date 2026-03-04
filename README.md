@@ -14,6 +14,7 @@
 </p>
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2603.02240"><img src="https://img.shields.io/badge/arXiv-2603.02240-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv"/></a>
   <a href="https://zenodo.org/records/18709670"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18709670-blue?style=for-the-badge&logo=doi&logoColor=white" alt="DOI"/></a>
   <a href="https://zenodo.org/records/18709670"><img src="https://img.shields.io/badge/Zenodo-Research_Paper-1682D4?style=for-the-badge&logo=zenodo&logoColor=white" alt="Zenodo"/></a>
   <a href="https://www.researchgate.net/publication/400976053"><img src="https://img.shields.io/badge/ResearchGate-Paper-00CCBB?style=for-the-badge&logo=researchgate&logoColor=white" alt="ResearchGate"/></a>
@@ -55,21 +56,22 @@ The paper presents SuperLocalMemory's architecture for defending against OWASP A
 
 | Platform | Link |
 |----------|------|
+| **arXiv** | [arXiv:2603.02240](https://arxiv.org/abs/2603.02240) |
 | **Zenodo** (CERN) | [DOI: 10.5281/zenodo.18709670](https://zenodo.org/records/18709670) |
 | **ResearchGate** | [Publication Page](https://www.researchgate.net/publication/400976053) |
-| **arXiv** | Submission under review |
 | **Research Portfolio** | [superlocalmemory.com/research](https://superlocalmemory.com/research) |
 
 If you use SuperLocalMemory in your research, please cite:
 
 ```bibtex
-@misc{bhardwaj2026superlocalmemory,
+@article{bhardwaj2026superlocalmemory,
   title={SuperLocalMemory: Privacy-Preserving Multi-Agent Memory with Bayesian Trust Defense Against Memory Poisoning},
   author={Bhardwaj, Varun Pratap},
   year={2026},
-  doi={10.5281/zenodo.18709670},
-  url={https://zenodo.org/records/18709670},
-  note={Preprint}
+  eprint={2603.02240},
+  archivePrefix={arXiv},
+  primaryClass={cs.AI},
+  url={https://arxiv.org/abs/2603.02240}
 }
 ```
 
