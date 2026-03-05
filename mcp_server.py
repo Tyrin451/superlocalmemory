@@ -33,7 +33,15 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any
 
 # Add src directory to path (use existing code!)
-MEMORY_DIR = Path(os.environ.get("SL_MEMORY_PATH") or str(Path.home() / ".claude-memory"))
+import logging
+_raw_memory_dir = os.environ.get("SL_MEMORY_PATH")
+MEMORY_DIR = Path(_raw_memory_dir).expanduser() if _raw_memory_dir else (Path.home() / ".claude-memory")
+MEMORY_DIR = MEMORY_DIR.resolve()
+
+_required_modules = ("memory_store_v2.py", "graph_engine.py", "pattern_learner.py")
+if not MEMORY_DIR.is_dir() or not all((MEMORY_DIR / m).exists() for m in _required_modules):
+    raise RuntimeError(f"Invalid SuperLocalMemory install directory: {MEMORY_DIR}")
+
 sys.path.insert(0, str(MEMORY_DIR))
 
 # Import existing core modules (zero duplicate logic)
@@ -599,12 +607,12 @@ def _eager_init():
         from behavioral.outcome_tracker import OutcomeTracker
         OutcomeTracker(str(MEMORY_DIR / "learning.db"))
     except Exception:
-        pass
+        logging.getLogger("superlocalmemory.mcp").exception("OutcomeTracker eager initialization failed")
     try:
         from compliance.audit_db import AuditDB
         AuditDB(str(MEMORY_DIR / "audit.db"))
     except Exception:
-        pass
+        logging.getLogger("superlocalmemory.mcp").exception("AuditDB eager initialization failed")
 
 # Run once at module load
 _eager_init()
