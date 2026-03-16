@@ -32,6 +32,8 @@ SuperLocalMemory gives AI assistants persistent, structured memory that survives
 
 **Works with:** Claude, Cursor, Windsurf, VS Code Copilot, Continue, Cody, ChatGPT Desktop, Gemini CLI, JetBrains, Zed, and 17+ AI tools via MCP.
 
+> **Upgrading from V2 (2.8.6)?** V3 is a complete architectural reinvention — new mathematical engine, new retrieval pipeline, new storage schema. Your existing data is preserved but requires migration. After installing V3, run `slm migrate` to upgrade your data. Read the [Migration Guide](docs/migration-from-v2.md) before upgrading. Backup is created automatically.
+
 ### Key Results
 
 | Metric | Score | Context |
