@@ -35,7 +35,7 @@ if _SLM_SRC_PATH.exists() and str(_SLM_SRC_PATH) not in sys.path:
     sys.path.insert(0, str(_SLM_SRC_PATH))
 
 try:
-    from memory_store_v2 import MemoryStoreV2
+    from superlocalmemory.core.engine import MemoryEngine
 except ImportError as exc:
     raise ImportError(
         "SuperLocalMemory V2 is not installed. "

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# SuperLocalMemory V2 Installation Script
+# SuperLocalMemory V3 Installation Script
 # Copyright (c) 2026 Varun Pratap Bhardwaj
 # Licensed under MIT License
 # Repository: https://github.com/qualixar/superlocalmemory
@@ -44,7 +44,7 @@ done
 # Print banner
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  SuperLocalMemory V2 - Installation                          ║"
+echo "║  SuperLocalMemory V3 - Installation                          ║"
 echo "║  by Varun Pratap Bhardwaj                                    ║"
 echo "║  https://github.com/qualixar/superlocalmemory              ║"
 echo "╚══════════════════════════════════════════════════════════════╝"

@@ -54,7 +54,7 @@ def _ensure_slm_imported():
         sys.path.insert(0, slm_path_str)
 
     try:
-        from memory_store_v2 import MemoryStoreV2  # type: ignore[import-untyped]
+        from superlocalmemory.core.engine import MemoryEngine  # type: ignore[import-untyped]
 
         _MemoryStoreV2 = MemoryStoreV2
         return _MemoryStoreV2
@@ -62,7 +62,7 @@ def _ensure_slm_imported():
         raise ImportError(
             "SuperLocalMemory V2 is not installed. "
             "Run the installer from https://github.com/qualixar/superlocalmemory "
-            "or ensure ~/.superlocalmemory/memory_store_v2.py exists."
+            "or ensure ~/.superlocalmemory/is installed via npm/pip."
         ) from exc
 
 

@@ -153,7 +153,7 @@ git checkout -b feature/your-feature-name
 superlocalmemory-repo/
 │
 ├── src/                          # Core source code
-│   ├── memory_store_v2.py        # Main storage layer
+│   ├── engine.py                    # V3 Memory Engine
 │   ├── graph_engine.py           # Knowledge graph
 │   ├── pattern_learner.py        # Pattern learning
 │   ├── tree_manager.py           # Hierarchical index

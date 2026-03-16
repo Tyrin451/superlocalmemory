@@ -1,5 +1,5 @@
 # ============================================================================
-# SuperLocalMemory V2.8.3 - Windows Installation Script (PowerShell)
+# SuperLocalMemory V3 - Windows Installation Script (PowerShell)
 # Copyright (c) 2026 Varun Pratap Bhardwaj
 # Licensed under MIT License
 # Repository: https://github.com/qualixar/superlocalmemory
@@ -31,7 +31,7 @@ if ($NonInteractive -or $Auto -or $Yes -or $y) {
 # Print banner
 Write-Host ""
 Write-Host "=================================================================="
-Write-Host "  SuperLocalMemory V2.8.3 - Windows Installation                 "
+Write-Host "  SuperLocalMemory V3 - Windows Installation                 "
 Write-Host "  by Varun Pratap Bhardwaj                                       "
 Write-Host "  https://github.com/qualixar/superlocalmemory                 "
 Write-Host "=================================================================="
@@ -272,9 +272,9 @@ if (-not $memoryCount) { $memoryCount = 0 }
 
 if ([int]$memoryCount -eq 0) {
     Write-Host "INFO: Adding sample memories for demonstration..." -ForegroundColor Yellow
-    & python "$INSTALL_DIR\memory_store_v2.py" add "SuperLocalMemory V2 is a local-first, privacy-focused memory system for AI assistants. All data stays on your machine." --tags "supermemory,system,intro" --importance 8 2>$null | Out-Null
-    & python "$INSTALL_DIR\memory_store_v2.py" add "Knowledge graph uses TF-IDF for entity extraction and Leiden clustering for community detection." --tags "architecture,graph" --importance 7 2>$null | Out-Null
-    & python "$INSTALL_DIR\memory_store_v2.py" add "Pattern learning analyzes your coding preferences, style, and terminology to provide better context." --tags "architecture,patterns" --importance 7 2>$null | Out-Null
+    & python "$INSTALL_DIR\superlocalmemory.cli.main" add "SuperLocalMemory V2 is a local-first, privacy-focused memory system for AI assistants. All data stays on your machine." --tags "supermemory,system,intro" --importance 8 2>$null | Out-Null
+    & python "$INSTALL_DIR\superlocalmemory.cli.main" add "Knowledge graph uses TF-IDF for entity extraction and Leiden clustering for community detection." --tags "architecture,graph" --importance 7 2>$null | Out-Null
+    & python "$INSTALL_DIR\superlocalmemory.cli.main" add "Pattern learning analyzes your coding preferences, style, and terminology to provide better context." --tags "architecture,patterns" --importance 7 2>$null | Out-Null
 }
 
 # Build knowledge graph (Layer 3)
@@ -575,7 +575,7 @@ Write-Host ""
 Write-Host "OK Commands available after terminal restart!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Quick start (restart terminal first):"
-Write-Host "  python $INSTALL_DIR\memory_store_v2.py"
+Write-Host "  python $INSTALL_DIR\superlocalmemory.cli.main"
 Write-Host ""
 
 # Optional: Offer to install optional features
