@@ -42,8 +42,8 @@ console.log('🌍 Global installation detected. Running system setup...\n');
 // Find the package root (where install.sh/install.ps1 lives)
 const packageRoot = path.join(__dirname, '..');
 const installScript = os.platform() === 'win32'
-    ? path.join(packageRoot, 'install.ps1')
-    : path.join(packageRoot, 'install.sh');
+    ? path.join(packageRoot, 'scripts', 'install.ps1')
+    : path.join(packageRoot, 'scripts', 'install.sh');
 
 // Check if install script exists
 if (!fs.existsSync(installScript)) {
