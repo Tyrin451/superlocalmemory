@@ -68,24 +68,21 @@ class EntropyGate:
             logger.debug("Entropy gate: blocked (low-info pattern: '%s')", normalized)
             return False
 
-        # Stage 2: Similarity-based deduplication
-        if self._embedder is not None and self._recent_embeddings:
+        # Stage 2: Similarity-based deduplication (requires embeddings)
+        if self._embedder is not None:
             emb = self._embedder.embed(content)
-            for recent in self._recent_embeddings:
-                sim = _cosine(emb, recent)
-                if sim > self._threshold:
-                    logger.debug(
-                        "Entropy gate: blocked (near-duplicate, sim=%.3f)", sim
-                    )
-                    return False
-            # Add to window
-            self._recent_embeddings.append(emb)
-            if len(self._recent_embeddings) > self._window_size:
-                self._recent_embeddings.pop(0)
-        elif self._embedder is not None:
-            # First content — add to window, always pass
-            emb = self._embedder.embed(content)
-            self._recent_embeddings.append(emb)
+            if emb is not None:
+                if self._recent_embeddings:
+                    for recent in self._recent_embeddings:
+                        sim = _cosine(emb, recent)
+                        if sim > self._threshold:
+                            logger.debug(
+                                "Entropy gate: blocked (near-duplicate, sim=%.3f)", sim
+                            )
+                            return False
+                self._recent_embeddings.append(emb)
+                if len(self._recent_embeddings) > self._window_size:
+                    self._recent_embeddings.pop(0)
 
         return True
 

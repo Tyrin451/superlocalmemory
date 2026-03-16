@@ -81,7 +81,12 @@ class MemoryEngine:
 
         self._db = DatabaseManager(self._config.db_path)
         self._db.initialize(schema)
-        self._embedder = EmbeddingService(self._config.embedding)
+        try:
+            emb = EmbeddingService(self._config.embedding)
+            self._embedder = emb if emb.is_available else None
+        except Exception as exc:
+            logger.warning("Embeddings unavailable (%s). BM25-only mode.", exc)
+            self._embedder = None
 
         if self._caps.llm_fact_extraction:
             self._llm = LLMBackbone(self._config.llm)

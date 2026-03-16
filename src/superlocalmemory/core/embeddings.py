@@ -56,6 +56,14 @@ class EmbeddingService:
         self._model: object | None = None
         self._lock = threading.Lock()
         self._loaded = False
+        self._available = True  # Set False if model can't load
+
+    @property
+    def is_available(self) -> bool:
+        """Check if embedding service has a usable model."""
+        if not self._loaded:
+            self._ensure_loaded()
+        return self._available and self._model is not None
 
     # ------------------------------------------------------------------
     # Public API
@@ -78,6 +86,9 @@ class EmbeddingService:
         """
         if not text or not text.strip():
             raise ValueError("Cannot embed empty text")
+        self._ensure_loaded()
+        if self._model is None:
+            return None
         vec = self._encode_single(text)
         self._validate_dimension(vec)
         return vec.tolist()
@@ -98,6 +109,9 @@ class EmbeddingService:
             if not t or not t.strip():
                 raise ValueError(f"Text at index {i} is empty")
 
+        self._ensure_loaded()
+        if self._model is None:
+            return [None] * len(texts)
         vectors = self._encode_batch(texts)
         for vec in vectors:
             self._validate_dimension(vec)
@@ -175,10 +189,14 @@ class EmbeddingService:
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
-            raise ImportError(
-                "sentence-transformers required: "
-                "pip install sentence-transformers"
+            logger.warning(
+                "sentence-transformers not installed. Embeddings disabled. "
+                "Install with: pip install sentence-transformers"
             )
+            self._model = None
+            self._loaded = True
+            self._available = False
+            return
         model = SentenceTransformer(
             self._config.model_name, trust_remote_code=False,
         )

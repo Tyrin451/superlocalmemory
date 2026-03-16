@@ -260,24 +260,50 @@ class V2Migrator:
             # Backfill V3 columns from V2 data
             conn.execute('UPDATE memories SET profile_id = COALESCE(profile, "default") WHERE profile_id IS NULL')
             conn.execute("UPDATE memories SET memory_id = 'v2_' || CAST(id AS TEXT) WHERE memory_id IS NULL")
+            # Create unique index on memory_id so V3 FKs work
+            try:
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_memory_id ON memories (memory_id)")
+            except Exception:
+                pass
+            # Disable FK enforcement for migrated DBs (V2 schema is incompatible)
+            conn.execute("PRAGMA foreign_keys=OFF")
+
+            # Rename ALL tables with incompatible schemas (V2 + old alpha)
+            # User data is in 'memories' table (already upgraded above)
+            # Everything else is computed/derived and will be recreated by V3
+            all_existing = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_v2_bak_%'"
+            ).fetchall()}
+            # Keep only: memories (upgraded), profiles, schema_version, v3_config, sqlite_sequence
+            keep_tables = {"memories", "profiles", "schema_version", "v3_config", "sqlite_sequence"}
+            v2_conflicting = [t for t in all_existing if t not in keep_tables and not t.startswith("_")]
+            for table in v2_conflicting:
+                try:
+                    conn.execute(f'ALTER TABLE "{table}" RENAME TO "_v2_bak_{table}"')
+                except Exception:
+                    pass  # Table may not exist
+
             conn.commit()
 
-            for sql in V3_TABLES_SQL:
-                conn.execute(sql)
-            for sql in V3_INDEXES_SQL:
-                conn.execute(sql)
-            # Mark migration
-            conn.execute(
-                "INSERT OR REPLACE INTO v3_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("migration_date", datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat()),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO v3_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("migration_version", "3.0.0", datetime.now(UTC).isoformat()),
-            )
+            # Use the FULL V3 schema (not the partial V3_TABLES_SQL)
+            from superlocalmemory.storage import schema
+            schema.create_all_tables(conn)
             conn.commit()
+            # Mark migration in config table
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, ?)",
+                    ("migration_date", datetime.now(UTC).isoformat(), datetime.now(UTC).isoformat()),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, ?)",
+                    ("migration_version", "3.0.0", datetime.now(UTC).isoformat()),
+                )
+                conn.commit()
+            except Exception:
+                pass  # Schema handles this on engine init
             conn.close()
-            stats["steps"].append(f"Extended schema ({len(V3_TABLES_SQL)} tables, {len(V3_INDEXES_SQL)} indexes)")
+            stats["steps"].append("Created V3 schema")
 
             # Step 5: Symlink (only if .claude-memory is not already a symlink)
             if not self._v2_base.is_symlink():
