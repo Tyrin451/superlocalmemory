@@ -1,6 +1,6 @@
 # V3 Mathematical Foundations
 
-SuperLocalMemory V3 introduces three mathematical pillars — each a **world first** in agent memory systems. These are described in our peer-reviewed paper ([Zenodo DOI: 10.5281/zenodo.19038659](https://zenodo.org/records/19038659)).
+SuperLocalMemory V3 introduces three mathematical pillars — each a **world first** in agent memory systems. These are described in our paper ([arXiv:2603.14588](https://arxiv.org/abs/2603.14588) | [Zenodo](https://zenodo.org/records/19038659)).
 
 ---
 
@@ -100,7 +100,7 @@ For the full mathematical treatment including proofs, theorems, and detailed exp
 
 *Varun Pratap Bhardwaj, Independent Researcher, 2026*
 
-[Zenodo DOI: 10.5281/zenodo.19038659](https://zenodo.org/records/19038659)
+[arXiv:2603.14588](https://arxiv.org/abs/2603.14588) | [Zenodo DOI: 10.5281/zenodo.19038659](https://zenodo.org/records/19038659)
 
 ---
 

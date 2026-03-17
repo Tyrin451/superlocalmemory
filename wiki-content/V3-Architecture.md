@@ -161,7 +161,7 @@ Evaluated on the LoCoMo conversational memory benchmark:
 
 Mathematical layers contribute +12.7pp average improvement over the engineering baseline across six conversations. Multi-hop sees the largest gain: 50% vs 38% (+12pp).
 
-Full methodology and results in the [V3 paper](https://zenodo.org/records/19038659).
+Full methodology and results in the [V3 paper](https://arxiv.org/abs/2603.14588) ([Zenodo](https://zenodo.org/records/19038659)).
 
 ---
 

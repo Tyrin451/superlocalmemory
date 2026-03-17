@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://superlocalmemory.com"><img src="https://img.shields.io/badge/Website-superlocalmemory.com-ff6b35?style=for-the-badge" alt="Website"/></a>
-  <a href="https://arxiv.org/abs/2603.02240"><img src="https://img.shields.io/badge/arXiv-2603.02240-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv Paper"/></a>
+  <a href="https://arxiv.org/abs/2603.14588"><img src="https://img.shields.io/badge/arXiv-2603.14588-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv V3 Paper"/></a>
   <a href="https://zenodo.org/records/19038659"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.19038659-blue?style=for-the-badge&logo=doi&logoColor=white" alt="V3 DOI"/></a>
 </p>
 
@@ -277,7 +277,7 @@ Evaluated on the [LoCoMo benchmark](https://arxiv.org/abs/2402.09714) (Long Conv
 ### V3: Information-Geometric Foundations
 > **SuperLocalMemory V3: Information-Geometric Foundations for Zero-LLM Enterprise Agent Memory**
 > Varun Pratap Bhardwaj (2026)
-> [Zenodo DOI: 10.5281/zenodo.19038659](https://zenodo.org/records/19038659)
+> [arXiv:2603.14588](https://arxiv.org/abs/2603.14588) | [Zenodo DOI: 10.5281/zenodo.19038659](https://zenodo.org/records/19038659)
 
 ### V2: Architecture & Engineering
 > **SuperLocalMemory: A Structured Local Memory Architecture for Persistent AI Agent Context**

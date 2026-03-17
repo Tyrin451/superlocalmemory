@@ -65,7 +65,7 @@ That's it. Your AI now remembers you.
 
 ## Research Papers
 
-- **V3 Paper:** [Information-Geometric Foundations for Agent Memory](https://zenodo.org/records/19038659) (Zenodo)
+- **V3 Paper:** [Information-Geometric Foundations for Agent Memory](https://arxiv.org/abs/2603.14588) (arXiv) | [Zenodo](https://zenodo.org/records/19038659)
 - **V2 Paper:** [Privacy-Preserving Multi-Agent Memory](https://arxiv.org/abs/2603.02240) (arXiv)
 
 ---
