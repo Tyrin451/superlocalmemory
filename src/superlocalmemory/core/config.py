@@ -353,6 +353,7 @@ class SLMConfig:
                     provider=llm_provider or "ollama",
                     model=llm_model or "phi3:mini",
                     api_base=llm_api_base or "http://localhost:11434",
+                    api_key=llm_api_key or "",
                 ),
                 retrieval=RetrievalConfig(use_cross_encoder=True),
             )
