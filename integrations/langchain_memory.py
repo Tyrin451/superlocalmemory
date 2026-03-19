@@ -1,30 +1,19 @@
 """
 SuperLocalMemory V3 — LangChain Integration
 ============================================
-Provides BaseChatMessageHistory and a retriever-style memory
-for use with LangChain LCEL (RunnableWithMessageHistory).
 
-Install:
-    npm install -g superlocalmemory   # install SLM
-    pip install langchain-core        # langchain dependency
+MIGRATION NOTICE: This adapter has been replaced by a standalone
+LangChain partner package: ``langchain-superlocalmemory``
 
-Usage:
-    from superlocalmemory.integrations.langchain_memory import (
-        SuperLocalMemoryChatHistory,
-        SuperLocalMemoryRetriever,
-    )
+    pip install langchain-superlocalmemory
 
-    # Conversation history (per-session)
-    history = SuperLocalMemoryChatHistory(session_id="my-project")
+The partner package uses the direct Python API (no subprocess calls)
+and follows LangChain's recommended integration pattern.
 
-    # With RunnableWithMessageHistory
-    from langchain_core.runnables.history import RunnableWithMessageHistory
-    chain_with_memory = RunnableWithMessageHistory(
-        chain,
-        lambda session_id: SuperLocalMemoryChatHistory(session_id=session_id),
-        input_messages_key="input",
-        history_messages_key="history",
-    )
+See: https://github.com/qualixar/langchain-superlocalmemory
+
+This file is kept for backward compatibility but will be removed
+in a future version. New projects should use the partner package.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj (qualixar.com)
 Paper: https://arxiv.org/abs/2603.14588
@@ -34,6 +23,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import warnings
 from typing import Any, Sequence
 
 from langchain_core.chat_history import BaseChatMessageHistory
@@ -42,8 +32,11 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
-    messages_from_dict,
-    messages_to_dict,
+)
+
+_DEPRECATION_MSG = (
+    "superlocalmemory.integrations.langchain_memory is deprecated. "
+    "Install the partner package instead: pip install langchain-superlocalmemory"
 )
 
 
@@ -64,18 +57,10 @@ def _run_slm(args: list[str]) -> dict[str, Any]:
 
 
 class SuperLocalMemoryChatHistory(BaseChatMessageHistory):
-    """
-    LangChain chat message history backed by SuperLocalMemory V3.
+    """LangChain chat message history backed by SuperLocalMemory V3.
 
-    Stores each message as a tagged fact so it is searchable and
-    persists across sessions. Retrieves conversation history by
-    recalling facts tagged with the session_id.
-
-    Args:
-        session_id: Unique identifier for this conversation session.
-            Used to scope memories so different sessions don't mix.
-        agent_id: Identifier logged in the SLM audit trail.
-        max_messages: Maximum messages to return from history (default 50).
+    .. deprecated::
+        Use ``langchain-superlocalmemory`` partner package instead.
     """
 
     def __init__(
@@ -84,14 +69,13 @@ class SuperLocalMemoryChatHistory(BaseChatMessageHistory):
         agent_id: str = "langchain",
         max_messages: int = 50,
     ) -> None:
+        warnings.warn(_DEPRECATION_MSG, DeprecationWarning, stacklevel=2)
         self.session_id = session_id
         self.agent_id = agent_id
         self.max_messages = max_messages
-        self._messages: list[BaseMessage] = []
 
     @property
     def messages(self) -> list[BaseMessage]:
-        """Retrieve conversation messages from SuperLocalMemory."""
         result = _run_slm([
             "recall",
             f"conversation session:{self.session_id}",
@@ -110,7 +94,6 @@ class SuperLocalMemoryChatHistory(BaseChatMessageHistory):
         return messages
 
     def add_messages(self, messages: Sequence[BaseMessage]) -> None:
-        """Persist new messages to SuperLocalMemory."""
         for msg in messages:
             prefix = {
                 "human": "[human]",
@@ -125,7 +108,6 @@ class SuperLocalMemoryChatHistory(BaseChatMessageHistory):
             )
 
     def clear(self) -> None:
-        """Clear all messages for this session from SuperLocalMemory."""
         result = _run_slm([
             "recall",
             f"session:{self.session_id}",
@@ -142,29 +124,18 @@ class SuperLocalMemoryChatHistory(BaseChatMessageHistory):
 
 
 class SuperLocalMemoryRetriever:
-    """
-    Retriever-style interface for querying SuperLocalMemory V3.
+    """Retriever-style interface for querying SuperLocalMemory V3.
 
-    Use this for RAG-style memory augmentation where you want to
-    inject relevant past context into a prompt rather than full
-    conversation history.
-
-    Args:
-        limit: Maximum number of memories to retrieve per query.
-        agent_id: Identifier for the calling agent.
-
-    Example:
-        retriever = SuperLocalMemoryRetriever(limit=5)
-        context = retriever.get_relevant_memories("auth middleware patterns")
-        # Returns list of strings to inject into prompt
+    .. deprecated::
+        Use ``langchain-superlocalmemory`` partner package instead.
     """
 
     def __init__(self, limit: int = 5, agent_id: str = "langchain") -> None:
+        warnings.warn(_DEPRECATION_MSG, DeprecationWarning, stacklevel=2)
         self.limit = limit
         self.agent_id = agent_id
 
     def get_relevant_memories(self, query: str) -> list[str]:
-        """Return a list of relevant memory strings for the query."""
         result = _run_slm(["recall", query, "--limit", str(self.limit)])
         return [
             fact.get("content", "")
@@ -173,7 +144,6 @@ class SuperLocalMemoryRetriever:
         ]
 
     def as_context_string(self, query: str) -> str:
-        """Return relevant memories as a formatted context block."""
         memories = self.get_relevant_memories(query)
         if not memories:
             return ""

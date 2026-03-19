@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 SuperLocalMemory (superlocalmemory.com)
+# Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
+# Part of Qualixar | Author: Varun Pratap Bhardwaj (qualixar.com | varunpratap.com)
 """Security headers middleware for FastAPI servers.
 
 Adds comprehensive security headers to all HTTP responses:

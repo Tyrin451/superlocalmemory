@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 Qualixar / SuperLocalMemory (superlocalmemory.com)
+# Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
 # Part of Qualixar | Author: Varun Pratap Bhardwaj (qualixar.com | varunpratap.com)
 """
 SourceQualityScorer -- Beta-binomial source quality scoring for V3 learning.
