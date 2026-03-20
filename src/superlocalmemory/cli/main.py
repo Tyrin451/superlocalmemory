@@ -70,11 +70,8 @@ documentation:
 
 def main() -> None:
     """Parse CLI arguments and dispatch to command handlers."""
-    try:
-        from importlib.metadata import version as _pkg_version
-        _ver = _pkg_version("superlocalmemory")
-    except Exception:
-        _ver = "unknown"
+    from superlocalmemory.cli.json_output import _get_version
+    _ver = _get_version()
 
     parser = argparse.ArgumentParser(
         prog="slm",

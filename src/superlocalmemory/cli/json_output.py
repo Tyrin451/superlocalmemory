@@ -18,12 +18,35 @@ import json
 
 
 def _get_version() -> str:
-    """Get installed package version."""
+    """Read version from package.json (npm), pyproject.toml, or metadata."""
+    from pathlib import Path
+    pkg_root = Path(__file__).resolve().parent.parent.parent.parent
+    # 1. package.json (npm installs)
+    try:
+        pkg_json = pkg_root / "package.json"
+        if pkg_json.exists():
+            with open(pkg_json) as f:
+                v = json.load(f).get("version", "")
+                if v:
+                    return v
+    except Exception:
+        pass
+    # 2. pyproject.toml (pip installs)
+    try:
+        import tomllib
+        toml_path = pkg_root / "pyproject.toml"
+        if toml_path.exists():
+            with open(toml_path, "rb") as f:
+                return tomllib.load(f)["project"]["version"]
+    except Exception:
+        pass
+    # 3. importlib.metadata fallback
     try:
         from importlib.metadata import version
         return version("superlocalmemory")
     except Exception:
-        return "unknown"
+        pass
+    return "unknown"
 
 
 def json_print(
