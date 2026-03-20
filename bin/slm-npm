@@ -70,8 +70,16 @@ if (!python) {
     process.exit(1);
 }
 
-// Launch V3 CLI via Python module
+// Handle --version directly from package.json (Python importlib.metadata
+// fails when running via PYTHONPATH instead of pip install)
 const args = process.argv.slice(2);
+if (args.includes('--version') || args.includes('-v')) {
+    const pkg = require(path.join(PKG_ROOT, 'package.json'));
+    console.log(`superlocalmemory ${pkg.version}`);
+    process.exit(0);
+}
+
+// Launch V3 CLI via Python module
 const pythonParts = python.split(' ');
 const result = spawnSync(pythonParts[0], [
     ...pythonParts.slice(1),
