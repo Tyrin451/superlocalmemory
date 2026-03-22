@@ -37,6 +37,11 @@ class EmbeddingConfig:
 
     model_name: str = "nomic-ai/nomic-embed-text-v1.5"
     dimension: int = 768
+    # Provider: "" = auto-detect, "sentence-transformers", "ollama", "cloud"
+    provider: str = ""
+    # Ollama settings (used when provider="ollama" or auto-detected)
+    ollama_model: str = "nomic-embed-text"
+    ollama_base_url: str = "http://localhost:11434"
     # Azure / cloud settings (Mode C only)
     api_endpoint: str = ""
     api_key: str = ""
@@ -45,7 +50,11 @@ class EmbeddingConfig:
 
     @property
     def is_cloud(self) -> bool:
-        return bool(self.api_endpoint)
+        return bool(self.api_endpoint) or self.provider == "cloud"
+
+    @property
+    def is_ollama(self) -> bool:
+        return self.provider == "ollama"
 
 
 # ---------------------------------------------------------------------------
@@ -235,15 +244,17 @@ class SLMConfig:
         data = json.loads(path.read_text())
         mode = Mode(data.get("mode", "a"))
         llm_data = data.get("llm", {})
+        emb_data = data.get("embedding", {})
         config = cls.for_mode(
             mode,
             llm_provider=llm_data.get("provider", ""),
             llm_model=llm_data.get("model", ""),
             llm_api_key=llm_data.get("api_key", ""),
             llm_api_base=llm_data.get("base_url", ""),
-            embedding_endpoint=data.get("embedding", {}).get("api_endpoint", ""),
-            embedding_key=data.get("embedding", {}).get("api_key", ""),
-            embedding_deployment=data.get("embedding", {}).get("deployment_name", ""),
+            embedding_provider=emb_data.get("provider", ""),
+            embedding_endpoint=emb_data.get("api_endpoint", ""),
+            embedding_key=emb_data.get("api_key", ""),
+            embedding_deployment=emb_data.get("deployment_name", ""),
         )
         config.active_profile = data.get("active_profile", "default")
         return config
@@ -265,6 +276,7 @@ class SLMConfig:
             "embedding": {
                 "model_name": self.embedding.model_name,
                 "dimension": self.embedding.dimension,
+                "provider": self.embedding.provider,
                 "api_endpoint": self.embedding.api_endpoint,
                 "api_key": self.embedding.api_key,
                 "deployment_name": self.embedding.deployment_name,
@@ -317,6 +329,7 @@ class SLMConfig:
         llm_model: str = "",
         llm_api_key: str = "",
         llm_api_base: str = "",
+        embedding_provider: str = "",
         embedding_endpoint: str = "",
         embedding_key: str = "",
         embedding_deployment: str = "",
@@ -331,6 +344,7 @@ class SLMConfig:
                 embedding=EmbeddingConfig(
                     model_name="nomic-ai/nomic-embed-text-v1.5",
                     dimension=768,
+                    provider=embedding_provider,
                 ),
                 llm=LLMConfig(),  # No LLM
                 retrieval=RetrievalConfig(
@@ -348,6 +362,7 @@ class SLMConfig:
                 embedding=EmbeddingConfig(
                     model_name="nomic-ai/nomic-embed-text-v1.5",
                     dimension=768,
+                    provider=embedding_provider,
                 ),
                 llm=LLMConfig(
                     provider=llm_provider or "ollama",

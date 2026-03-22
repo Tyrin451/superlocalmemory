@@ -171,6 +171,8 @@ class TypeRouter:
 
         assert self._template_embeddings is not None
         fact_emb = self._embedder.embed(fact.content)
+        if fact_emb is None:
+            return self._classify_keywords(fact)
 
         best_type = FactType.SEMANTIC
         best_score = -1.0

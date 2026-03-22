@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import select
 import subprocess
 import sys
 import threading
@@ -45,6 +46,7 @@ class DimensionMismatchError(RuntimeError):
 
 
 _IDLE_TIMEOUT_SECONDS = 120  # 2 minutes — kill worker after idle
+_SUBPROCESS_RESPONSE_TIMEOUT = 60  # seconds — max wait for worker response
 
 
 class EmbeddingService:
@@ -137,7 +139,11 @@ class EmbeddingService:
     # ------------------------------------------------------------------
 
     def _subprocess_embed(self, texts: list[str]) -> list[list[float]] | None:
-        """Send texts to worker subprocess, get embeddings back."""
+        """Send texts to worker subprocess, get embeddings back.
+
+        Includes a timeout (_SUBPROCESS_RESPONSE_TIMEOUT seconds) so the CLI
+        never hangs indefinitely on cold model loads or network issues.
+        """
         with self._lock:
             self._ensure_worker()
             if self._worker_proc is None:
@@ -153,9 +159,12 @@ class EmbeddingService:
             try:
                 self._worker_proc.stdin.write(req)
                 self._worker_proc.stdin.flush()
-                resp_line = self._worker_proc.stdout.readline()
+                resp_line = self._readline_with_timeout(
+                    self._worker_proc.stdout,
+                    _SUBPROCESS_RESPONSE_TIMEOUT,
+                )
                 if not resp_line:
-                    logger.warning("Worker returned empty response, restarting")
+                    logger.warning("Worker returned empty or timed out, restarting")
                     self._kill_worker()
                     return None
                 resp = json.loads(resp_line)
@@ -168,6 +177,31 @@ class EmbeddingService:
                 logger.warning("Worker communication failed: %s", exc)
                 self._kill_worker()
                 return None
+
+    @staticmethod
+    def _readline_with_timeout(stream, timeout_seconds: float) -> str:
+        """Read a line from stream with a timeout. Returns '' on timeout."""
+        result_container: list[str] = []
+        error_container: list[Exception] = []
+
+        def _read() -> None:
+            try:
+                result_container.append(stream.readline())
+            except Exception as exc:
+                error_container.append(exc)
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(timeout=timeout_seconds)
+
+        if reader.is_alive():
+            logger.warning(
+                "Embedding worker did not respond within %ds", timeout_seconds,
+            )
+            return ""
+        if error_container:
+            raise error_container[0]
+        return result_container[0] if result_container else ""
 
     def _ensure_worker(self) -> None:
         """Spawn worker subprocess if not running."""

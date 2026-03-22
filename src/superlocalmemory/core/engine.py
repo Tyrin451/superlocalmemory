@@ -81,12 +81,7 @@ class MemoryEngine:
 
         self._db = DatabaseManager(self._config.db_path)
         self._db.initialize(schema)
-        try:
-            emb = EmbeddingService(self._config.embedding)
-            self._embedder = emb if emb.is_available else None
-        except Exception as exc:
-            logger.warning("Embeddings unavailable (%s). BM25-only mode.", exc)
-            self._embedder = None
+        self._embedder = self._init_embedder()
 
         if self._caps.llm_fact_extraction:
             self._llm = LLMBackbone(self._config.llm)
@@ -114,6 +109,76 @@ class MemoryEngine:
         self._initialized = True
         logger.info("MemoryEngine initialized: mode=%s profile=%s",
                      self._config.mode.value, self._profile_id)
+
+    def _init_embedder(self):
+        """Initialize the best available embedding provider.
+
+        Priority order:
+        1. Explicit provider in config (ollama / cloud / sentence-transformers)
+        2. Auto-detect: if LLM provider=ollama and Ollama has embedding model → use it
+        3. Fallback to sentence-transformers subprocess
+        4. If nothing works → None (BM25-only mode)
+        """
+        from superlocalmemory.core.embeddings import EmbeddingService
+
+        emb_cfg = self._config.embedding
+        provider = emb_cfg.provider
+
+        # --- Explicit ollama provider ---
+        if provider == "ollama":
+            return self._try_ollama_embedder(emb_cfg)
+
+        # --- Explicit cloud provider ---
+        if provider == "cloud" or emb_cfg.is_cloud:
+            return self._try_service_embedder(EmbeddingService, emb_cfg)
+
+        # --- Explicit sentence-transformers ---
+        if provider == "sentence-transformers":
+            return self._try_service_embedder(EmbeddingService, emb_cfg)
+
+        # --- Auto-detect: try Ollama first (fast path, <1s) ---
+        # Check regardless of LLM provider — if Ollama is running and has
+        # the embedding model, use it. This avoids the 30s cold start of
+        # sentence-transformers subprocess.
+        ollama_emb = self._try_ollama_embedder(emb_cfg)
+        if ollama_emb is not None:
+            logger.info("Auto-detected Ollama embeddings (fast path)")
+            return ollama_emb
+
+        # --- Fallback: sentence-transformers subprocess ---
+        return self._try_service_embedder(EmbeddingService, emb_cfg)
+
+    def _try_ollama_embedder(self, emb_cfg):
+        """Try to create an OllamaEmbedder. Returns it or None."""
+        try:
+            from superlocalmemory.core.ollama_embedder import OllamaEmbedder
+            emb = OllamaEmbedder(
+                model=emb_cfg.ollama_model,
+                base_url=emb_cfg.ollama_base_url,
+                dimension=emb_cfg.dimension,
+            )
+            if emb.is_available:
+                logger.info("Using Ollama embeddings (%s)", emb_cfg.ollama_model)
+                return emb
+            logger.warning(
+                "Ollama embedder not available (model=%s). Falling back.",
+                emb_cfg.ollama_model,
+            )
+        except Exception as exc:
+            logger.warning("OllamaEmbedder init failed: %s", exc)
+        return None
+
+    @staticmethod
+    def _try_service_embedder(cls, emb_cfg):
+        """Try to create an EmbeddingService. Returns it or None."""
+        try:
+            emb = cls(emb_cfg)
+            if emb.is_available:
+                return emb
+            logger.warning("EmbeddingService not available. BM25-only mode.")
+        except Exception as exc:
+            logger.warning("Embeddings unavailable (%s). BM25-only mode.", exc)
+        return None
 
     def store(
         self,
