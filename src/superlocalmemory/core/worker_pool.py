@@ -28,8 +28,9 @@ import time
 
 logger = logging.getLogger(__name__)
 
-_IDLE_TIMEOUT = 120  # 2 min — kill worker after idle
+_IDLE_TIMEOUT = 120   # 2 min — kill worker after idle
 _REQUEST_TIMEOUT = 60  # 60 sec max per request
+_WARMUP_TIMEOUT = 120  # 2 min — first cold start loads PyTorch + models
 
 
 class WorkerPool:
@@ -102,6 +103,31 @@ class WorkerPool:
         with self._lock:
             self._kill()
 
+    def warmup(self) -> None:
+        """Pre-spawn and warm up the worker in a background thread.
+
+        Spawns the recall_worker subprocess so that PyTorch, models, and
+        the engine are all loaded BEFORE the first user request. This
+        amortizes the 30s cold-start at dashboard/MCP startup time.
+
+        Call from startup events — non-blocking, runs in background.
+        """
+        def _do_warmup() -> None:
+            logger.info("Worker warmup starting (background)...")
+            try:
+                result = self._send_with_timeout(
+                    {"cmd": "warmup"}, timeout=_WARMUP_TIMEOUT,
+                )
+                if result.get("ok"):
+                    logger.info("Worker warmup complete (engine + models ready)")
+                else:
+                    logger.warning("Worker warmup returned: %s", result)
+            except Exception as exc:
+                logger.warning("Worker warmup failed: %s", exc)
+
+        t = threading.Thread(target=_do_warmup, daemon=True, name="worker-warmup")
+        t.start()
+
     @property
     def worker_pid(self) -> int | None:
         """PID of the worker process, or None if not running."""
@@ -115,6 +141,10 @@ class WorkerPool:
 
     def _send(self, request: dict) -> dict:
         """Send request to worker and get response. Thread-safe."""
+        return self._send_with_timeout(request, timeout=_REQUEST_TIMEOUT)
+
+    def _send_with_timeout(self, request: dict, timeout: float) -> dict:
+        """Send request with configurable timeout. Thread-safe."""
         with self._lock:
             self._ensure_worker()
             if self._proc is None:
@@ -129,7 +159,7 @@ class WorkerPool:
                 import selectors
                 sel = selectors.DefaultSelector()
                 sel.register(self._proc.stdout, selectors.EVENT_READ)
-                ready = sel.select(timeout=_REQUEST_TIMEOUT)
+                ready = sel.select(timeout=timeout)
                 sel.close()
 
                 if not ready:

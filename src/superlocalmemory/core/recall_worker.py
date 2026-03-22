@@ -222,6 +222,20 @@ def _worker_main() -> None:
             _respond({"ok": True})
             continue
 
+        if cmd == "warmup":
+            # Pre-load engine + all models (embedding, reranker, BM25, LLM)
+            # Called at dashboard/MCP startup so first real request is fast.
+            # A dummy recall triggers lazy-loaded components (cross-encoder, BM25 index).
+            try:
+                engine = _get_engine()
+                fact_count = engine._db.get_fact_count(engine._profile_id) if engine._db else 0
+                if fact_count > 0:
+                    engine.recall("warmup", limit=1)
+                _respond({"ok": True, "message": "Engine warm", "facts": fact_count})
+            except Exception as exc:
+                _respond({"ok": False, "error": f"Warmup failed: {exc}"})
+            continue
+
         try:
             if cmd == "recall":
                 result = _handle_recall(req.get("query", ""), req.get("limit", 10))

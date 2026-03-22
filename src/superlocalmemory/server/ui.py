@@ -199,13 +199,24 @@ def create_app() -> FastAPI:
 
     @application.on_event("startup")
     async def startup_event():
-        """Initialize event bus. Engine runs in subprocess worker (never in this process)."""
-        # Engine is NEVER loaded in the dashboard process.
-        # All recall/search operations go through WorkerPool subprocess.
-        # This keeps the dashboard permanently at ~60 MB.
+        """Initialize event bus and warm up worker subprocess.
+
+        Engine runs in subprocess worker (never in this process).
+        Background warmup pre-loads PyTorch + models so first recall is fast.
+        """
         application.state.engine = None
         logger.info("Dashboard started (~60 MB, engine runs in subprocess worker)")
         register_event_listener()
+
+        # Background warmup: pre-spawn worker and load all models.
+        # This runs in a daemon thread — dashboard is responsive immediately.
+        # Worker will be ready by the time user does first search (~10-30s).
+        try:
+            from superlocalmemory.core.worker_pool import WorkerPool
+            WorkerPool.shared().warmup()
+            logger.info("Worker warmup initiated (background)")
+        except Exception as exc:
+            logger.warning("Worker warmup failed to start: %s", exc)
 
     @application.on_event("shutdown")
     async def shutdown_event():
