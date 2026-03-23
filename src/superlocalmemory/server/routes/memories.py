@@ -46,53 +46,37 @@ def _fetch_graph_data(
 ) -> tuple[list, list, list]:
     """Fetch graph nodes, links, clusters from V3 or V2 schema."""
     if use_v3:
-        # Graph-first: fetch edges, then get connected nodes, then fill slots
+        # Recency-first: get the most recent nodes, then find their edges
         cursor.execute("""
-            SELECT source_id as source, target_id as target,
-                   weight, edge_type as relationship_type
-            FROM graph_edges WHERE profile_id = ?
-            ORDER BY weight DESC
-        """, (profile,))
-        all_links = cursor.fetchall()
+            SELECT fact_id as id, content, fact_type as category,
+                   confidence as importance, session_id as project_name,
+                   created_at
+            FROM atomic_facts
+            WHERE profile_id = ? AND confidence >= ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (profile, min_importance / 10.0, max_nodes))
+        nodes = cursor.fetchall()
 
-        connected_ids = set()
-        for lk in all_links:
-            connected_ids.add(lk['source'])
-            connected_ids.add(lk['target'])
+        node_ids = {n['id'] for n in nodes}
 
-        # Fetch connected nodes first (these have edges to display)
-        connected_nodes: list = []
-        if connected_ids:
-            ph = ','.join('?' * len(connected_ids))
+        # Fetch edges between these nodes
+        if node_ids:
+            ph = ','.join('?' * len(node_ids))
+            id_list = list(node_ids)
             cursor.execute(f"""
-                SELECT fact_id as id, content, fact_type as category,
-                       confidence as importance, session_id as project_name,
-                       created_at
-                FROM atomic_facts
-                WHERE profile_id = ? AND fact_id IN ({ph})
-            """, [profile] + list(connected_ids))
-            connected_nodes = cursor.fetchall()
+                SELECT source_id as source, target_id as target,
+                       weight, edge_type as relationship_type
+                FROM graph_edges
+                WHERE profile_id = ?
+                  AND source_id IN ({ph}) AND target_id IN ({ph})
+                ORDER BY weight DESC
+            """, [profile] + id_list + id_list)
+            all_links = cursor.fetchall()
+        else:
+            all_links = []
 
-        # Fill remaining slots with top-confidence unconnected nodes
-        remaining = max_nodes - len(connected_nodes)
-        if remaining > 0:
-            existing = {n['id'] for n in connected_nodes}
-            cursor.execute("""
-                SELECT fact_id as id, content, fact_type as category,
-                       confidence as importance, session_id as project_name,
-                       created_at
-                FROM atomic_facts
-                WHERE profile_id = ? AND confidence >= ?
-                ORDER BY confidence DESC, created_at DESC
-                LIMIT ?
-            """, (profile, min_importance / 10.0, remaining + len(existing)))
-            for n in cursor.fetchall():
-                if n['id'] not in existing:
-                    connected_nodes.append(n)
-                    if len(connected_nodes) >= max_nodes:
-                        break
-
-        nodes = connected_nodes[:max_nodes]
+        links = all_links
         for n in nodes:
             n['entities'] = []
             n['content_preview'] = _preview(n.get('content'))
@@ -101,7 +85,33 @@ def _fetch_graph_data(
         node_ids = {n['id'] for n in nodes}
         links = [lk for lk in all_links
                  if lk['source'] in node_ids and lk['target'] in node_ids]
-        return nodes, links, []
+
+        # Compute clusters from memory_scenes
+        clusters = []
+        try:
+            cursor.execute("""
+                SELECT scene_id, theme, fact_ids_json
+                FROM memory_scenes WHERE profile_id = ?
+            """, (profile,))
+            for row in cursor.fetchall():
+                fact_ids = []
+                try:
+                    fact_ids = json.loads(row.get('fact_ids_json', '[]') or '[]')
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                # Only include clusters that overlap with displayed nodes
+                overlap = [fid for fid in fact_ids if fid in node_ids]
+                if overlap:
+                    clusters.append({
+                        'cluster_id': row['scene_id'],
+                        'size': len(fact_ids),
+                        'visible_size': len(overlap),
+                        'theme': row.get('theme', ''),
+                    })
+        except Exception:
+            pass
+
+        return nodes, links, clusters
 
     # V2 fallback
     try:
@@ -362,15 +372,54 @@ async def get_clusters(request: Request):
         profile = get_active_profile()
         unclustered = 0
 
-        if _has_table(cursor, 'scene_facts'):
+        # V3 schema: memory_scenes stores fact_ids_json (JSON array)
+        if _has_table(cursor, 'memory_scenes'):
             cursor.execute("""
-                SELECT s.scene_id as cluster_id, COUNT(sf.fact_id) as member_count,
-                       s.summary, s.created_at as first_memory
-                FROM scenes s JOIN scene_facts sf ON s.scene_id = sf.scene_id
-                WHERE s.profile_id = ? GROUP BY s.scene_id ORDER BY member_count DESC
+                SELECT scene_id as cluster_id, theme, fact_ids_json,
+                       entity_ids_json, created_at as first_memory
+                FROM memory_scenes WHERE profile_id = ?
+                ORDER BY created_at DESC
             """, (profile,))
-            clusters = [dict(r, top_entities=[]) for r in cursor.fetchall()]
+            raw_scenes = cursor.fetchall()
+            clusters = []
+            for scene in raw_scenes:
+                fact_ids = []
+                try:
+                    fact_ids = json.loads(scene.get('fact_ids_json', '[]') or '[]')
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                entity_ids = []
+                try:
+                    entity_ids = json.loads(scene.get('entity_ids_json', '[]') or '[]')
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                clusters.append({
+                    'cluster_id': scene['cluster_id'],
+                    'member_count': len(fact_ids),
+                    'categories': scene.get('theme', ''),
+                    'summary': scene.get('theme', ''),
+                    'first_memory': scene.get('first_memory', ''),
+                    'top_entities': entity_ids[:5],
+                })
+            # Filter out empty clusters
+            clusters = [c for c in clusters if c['member_count'] > 0]
+            clusters.sort(key=lambda c: c['member_count'], reverse=True)
+
+            # Count facts not in any scene
+            all_scene_fact_ids = set()
+            for scene in raw_scenes:
+                try:
+                    ids = json.loads(scene.get('fact_ids_json', '[]') or '[]')
+                    all_scene_fact_ids.update(ids)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            total_facts = cursor.execute(
+                "SELECT COUNT(*) as c FROM atomic_facts WHERE profile_id = ?",
+                (profile,),
+            ).fetchone()['c']
+            unclustered = total_facts - len(all_scene_fact_ids)
         else:
+            # V2 fallback
             try:
                 cursor.execute("""
                     SELECT cluster_id, COUNT(*) as member_count,
@@ -382,8 +431,14 @@ async def get_clusters(request: Request):
                 clusters = [dict(r, top_entities=[]) for r in cursor.fetchall()]
             except Exception:
                 clusters = []
-            cursor.execute("SELECT COUNT(*) as c FROM memories WHERE cluster_id IS NULL AND profile = ?", (profile,))
-            unclustered = cursor.fetchone()['c']
+            try:
+                cursor.execute(
+                    "SELECT COUNT(*) as c FROM memories WHERE cluster_id IS NULL AND profile = ?",
+                    (profile,),
+                )
+                unclustered = cursor.fetchone()['c']
+            except Exception:
+                unclustered = 0
 
         conn.close()
         return {"clusters": clusters, "total_clusters": len(clusters), "unclustered_count": unclustered}
@@ -392,21 +447,41 @@ async def get_clusters(request: Request):
 
 
 @router.get("/api/clusters/{cluster_id}")
-async def get_cluster_detail(request: Request, cluster_id: int, limit: int = Query(50, ge=1, le=200)):
-    """Get detailed view of a specific cluster."""
+async def get_cluster_detail(request: Request, cluster_id: str, limit: int = Query(50, ge=1, le=200)):
+    """Get detailed view of a specific cluster (scene)."""
     try:
         conn = get_db_connection()
         conn.row_factory = dict_factory
         cursor = conn.cursor()
         profile = get_active_profile()
 
-        if _has_table(cursor, 'scene_facts'):
-            cursor.execute("""
-                SELECT f.fact_id as id, f.content, f.fact_type as category,
-                       f.confidence as importance, f.created_at
-                FROM atomic_facts f JOIN scene_facts sf ON f.fact_id = sf.fact_id
-                WHERE sf.scene_id = ? AND f.profile_id = ? ORDER BY f.confidence DESC LIMIT ?
-            """, (str(cluster_id), profile, limit))
+        if _has_table(cursor, 'memory_scenes'):
+            # Get fact IDs from the scene's JSON array
+            cursor.execute(
+                "SELECT fact_ids_json, theme FROM memory_scenes "
+                "WHERE scene_id = ? AND profile_id = ?",
+                (cluster_id, profile),
+            )
+            scene_row = cursor.fetchone()
+            if scene_row:
+                fact_ids = []
+                try:
+                    fact_ids = json.loads(scene_row.get('fact_ids_json', '[]') or '[]')
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                if fact_ids:
+                    ph = ','.join('?' * min(len(fact_ids), limit))
+                    cursor.execute(f"""
+                        SELECT fact_id as id, content, fact_type as category,
+                               confidence as importance, created_at
+                        FROM atomic_facts
+                        WHERE profile_id = ? AND fact_id IN ({ph})
+                        ORDER BY confidence DESC
+                    """, [profile] + fact_ids[:limit])
+                else:
+                    cursor.execute("SELECT 1 WHERE 0")  # empty result
+            else:
+                cursor.execute("SELECT 1 WHERE 0")  # empty result
         else:
             cursor.execute("""
                 SELECT id, content, summary, category, project_name, importance, created_at, tags

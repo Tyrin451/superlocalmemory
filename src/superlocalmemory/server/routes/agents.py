@@ -43,13 +43,15 @@ async def get_agents(
     if not REGISTRY_AVAILABLE:
         return {"agents": [], "count": 0, "message": "Agent registry not available"}
     try:
-        engine = getattr(request.app.state, "engine", None)
-        if engine and hasattr(engine, '_db'):
-            registry = AgentRegistry(engine._db)
-            agents = registry.list_agents(protocol=protocol, limit=limit)
-            stats = registry.get_stats()
-            return {"agents": agents, "count": len(agents), "stats": stats}
-        return {"agents": [], "count": 0, "message": "Engine not initialized"}
+        from pathlib import Path
+        registry_path = Path.home() / ".superlocalmemory" / "agents.json"
+        registry = AgentRegistry(persist_path=registry_path)
+        agents = registry.list_agents()
+        return {
+            "agents": agents,
+            "count": len(agents),
+            "stats": {"total_agents": len(agents)},
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent registry error: {str(e)}")
 
@@ -60,11 +62,11 @@ async def get_agent_stats(request: Request):
     if not REGISTRY_AVAILABLE:
         return {"total_agents": 0, "message": "Agent registry not available"}
     try:
-        engine = getattr(request.app.state, "engine", None)
-        if engine and hasattr(engine, '_db'):
-            registry = AgentRegistry(engine._db)
-            return registry.get_stats()
-        return {"total_agents": 0, "message": "Engine not initialized"}
+        from pathlib import Path
+        registry_path = Path.home() / ".superlocalmemory" / "agents.json"
+        registry = AgentRegistry(persist_path=registry_path)
+        agents = registry.list_agents()
+        return {"total_agents": len(agents)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent stats error: {str(e)}")
 

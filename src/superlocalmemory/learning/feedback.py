@@ -314,3 +314,6 @@ class FeedbackCollector:
             }
         finally:
             conn.close()
+
+    # Alias used by dashboard routes
+    get_feedback_summary = get_summary

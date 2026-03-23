@@ -187,8 +187,14 @@ class TestStoreFlow:
         assert engine.fact_count > 0
 
     def test_store_multiple_sessions(self, engine: MemoryEngine) -> None:
-        engine.store("Fact from session 1", session_id="s1")
-        engine.store("Fact from session 2", session_id="s2")
+        engine.store(
+            "Alice works as a data scientist at Amazon in Seattle.",
+            session_id="s1",
+        )
+        engine.store(
+            "Bob graduated from MIT and now teaches at Stanford University.",
+            session_id="s2",
+        )
         assert engine.fact_count >= 2
 
     def test_empty_content_returns_empty(self, engine: MemoryEngine) -> None:

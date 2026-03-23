@@ -17,9 +17,36 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Callable
 
 logger = logging.getLogger(__name__)
+
+MEMORY_DIR = Path.home() / ".superlocalmemory"
+DB_PATH = MEMORY_DIR / "memory.db"
+
+
+def _emit_event(event_type: str, payload: dict | None = None,
+                source_agent: str = "mcp_client") -> None:
+    """Emit an event to the EventBus (best-effort, never raises)."""
+    try:
+        from superlocalmemory.infra.event_bus import EventBus
+        bus = EventBus.get_instance(str(DB_PATH))
+        bus.emit(event_type, payload=payload, source_agent=source_agent,
+                 source_protocol="mcp")
+    except Exception:
+        pass
+
+
+def _register_agent(agent_id: str, profile_id: str) -> None:
+    """Register an agent in the AgentRegistry (best-effort)."""
+    try:
+        from superlocalmemory.core.registry import AgentRegistry
+        registry_path = MEMORY_DIR / "agents.json"
+        registry = AgentRegistry(persist_path=registry_path)
+        registry.register_agent(agent_id, profile_id)
+    except Exception:
+        pass
 
 
 def register_active_tools(server, get_engine: Callable) -> None:
@@ -77,6 +104,14 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 feedback_count = engine._adaptive_learner.get_feedback_count(pid)
             except Exception:
                 pass
+
+            # Register agent + emit event
+            _register_agent("mcp_client", pid)
+            _emit_event("agent.connected", {
+                "agent_id": "mcp_client",
+                "project_path": project_path,
+                "memory_count": len(memories),
+            })
 
             return {
                 "success": True,
@@ -148,6 +183,14 @@ def register_active_tools(server, get_engine: Callable) -> None:
                 metadata={"agent_id": agent_id, "source": "auto-observe"},
             )
 
+            if stored:
+                _emit_event("memory.created", {
+                    "agent_id": agent_id,
+                    "category": decision.category,
+                    "content_preview": content[:80],
+                    "source": "auto-observe",
+                }, source_agent=agent_id)
+
             return {
                 "captured": stored,
                 "category": decision.category,
@@ -190,6 +233,13 @@ def register_active_tools(server, get_engine: Callable) -> None:
             )
 
             count = engine._adaptive_learner.get_feedback_count(pid)
+
+            _emit_event("pattern.learned", {
+                "fact_id": fact_id,
+                "feedback": feedback,
+                "total_signals": count,
+                "phase": 1 if count < 50 else (2 if count < 200 else 3),
+            })
 
             return {
                 "success": True,

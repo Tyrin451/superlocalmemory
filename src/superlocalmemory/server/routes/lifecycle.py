@@ -38,32 +38,32 @@ async def lifecycle_status():
         conn = sqlite3.connect(str(DB_PATH))
         conn.row_factory = sqlite3.Row
 
-        # Try V3 schema first (atomic_facts with lifecycle_state)
+        # Try V3 schema first (atomic_facts with lifecycle column)
         states = {}
         try:
             rows = conn.execute(
-                "SELECT lifecycle_state, COUNT(*) as cnt "
-                "FROM atomic_facts WHERE profile_id = ? GROUP BY lifecycle_state",
+                "SELECT lifecycle, COUNT(*) as cnt "
+                "FROM atomic_facts WHERE profile_id = ? GROUP BY lifecycle",
                 (profile,),
             ).fetchall()
             states = {
-                (row['lifecycle_state'] or 'active'): row['cnt']
+                (row['lifecycle'] or 'active'): row['cnt']
                 for row in rows
             }
         except sqlite3.OperationalError:
             # V2 fallback: memories table
             try:
                 rows = conn.execute(
-                    "SELECT lifecycle_state, COUNT(*) as cnt "
-                    "FROM memories WHERE profile = ? GROUP BY lifecycle_state",
+                    "SELECT lifecycle, COUNT(*) as cnt "
+                    "FROM memories WHERE profile = ? GROUP BY lifecycle",
                     (profile,),
                 ).fetchall()
                 states = {
-                    (row['lifecycle_state'] or 'active'): row['cnt']
+                    (row['lifecycle'] or 'active'): row['cnt']
                     for row in rows
                 }
             except sqlite3.OperationalError:
-                # No lifecycle_state column at all
+                # No lifecycle column at all — count everything as active
                 total = conn.execute(
                     "SELECT COUNT(*) FROM atomic_facts WHERE profile_id = ?",
                     (profile,),
@@ -80,7 +80,7 @@ async def lifecycle_status():
                     "SELECT AVG(julianday('now') - julianday(created_at)) as avg_age, "
                     "MIN(julianday('now') - julianday(created_at)) as min_age, "
                     "MAX(julianday('now') - julianday(created_at)) as max_age "
-                    "FROM atomic_facts WHERE profile_id = ? AND lifecycle_state = ?",
+                    "FROM atomic_facts WHERE profile_id = ? AND lifecycle = ?",
                     (profile, state),
                 ).fetchone()
                 if row and row['avg_age'] is not None:

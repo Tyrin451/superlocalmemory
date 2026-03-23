@@ -15,9 +15,24 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+_DB_PATH = str(Path.home() / ".superlocalmemory" / "memory.db")
+
+
+def _emit_event(event_type: str, payload: dict | None = None,
+                source_agent: str = "mcp_client") -> None:
+    """Emit an event to the EventBus (best-effort, never raises)."""
+    try:
+        from superlocalmemory.infra.event_bus import EventBus
+        bus = EventBus.get_instance(_DB_PATH)
+        bus.emit(event_type, payload=payload, source_agent=source_agent,
+                 source_protocol="mcp")
+    except Exception:
+        pass
 
 
 def _record_recall_hits(get_engine: Callable, query: str, results: list[dict]) -> None:
@@ -89,6 +104,11 @@ def register_core_tools(server, get_engine: Callable) -> None:
                 "session_id": session_id,
             })
             if result.get("ok"):
+                _emit_event("memory.created", {
+                    "content_preview": content[:80],
+                    "agent_id": agent_id,
+                    "fact_count": result.get("count", 0),
+                }, source_agent=agent_id)
                 return {"success": True, "fact_ids": result.get("fact_ids", []), "count": result.get("count", 0)}
             return {"success": False, "error": result.get("error", "Store failed")}
         except Exception as exc:
@@ -108,6 +128,12 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     _record_recall_hits(get_engine, query, result.get("results", []))
                 except Exception:
                     pass  # Feedback is non-critical, never block recall
+                _emit_event("memory.recalled", {
+                    "query": query[:80],
+                    "result_count": result.get("result_count", 0),
+                    "query_type": result.get("query_type", "unknown"),
+                    "agent_id": agent_id,
+                }, source_agent=agent_id)
                 return {
                     "success": True,
                     "results": result.get("results", []),
@@ -362,6 +388,10 @@ def register_core_tools(server, get_engine: Callable) -> None:
             })
             if result.get("ok"):
                 logger.info("Memory deleted: %s by agent: %s", fact_id[:16], agent_id)
+                _emit_event("memory.deleted", {
+                    "fact_id": fact_id,
+                    "agent_id": agent_id,
+                }, source_agent=agent_id)
                 return {"success": True, "deleted": fact_id, "agent_id": agent_id}
             return {"success": False, "error": result.get("error", "Delete failed")}
         except Exception as exc:

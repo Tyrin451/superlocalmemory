@@ -104,7 +104,7 @@ async def learning_status():
         feedback = _get_feedback()
         if feedback:
             try:
-                old_stats = feedback.get_feedback_summary()
+                old_stats = feedback.get_feedback_summary(active_profile)
                 if isinstance(old_stats, dict):
                     old_stats["feedback_count"] = signal_count
                     old_stats["active_profile"] = active_profile
@@ -274,8 +274,9 @@ async def feedback_stats():
         by_type = {}
 
         if feedback:
-            summary = feedback.get_feedback_summary()
-            total = summary.get("total_signals", 0)
+            profile = get_active_profile()
+            summary = feedback.get_feedback_summary(profile)
+            total = summary.get("total", summary.get("total_signals", 0))
             by_channel = summary.get("by_channel", {})
             by_type = summary.get("by_type", {})
 
