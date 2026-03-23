@@ -20,6 +20,52 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 
+def _record_recall_hits(get_engine: Callable, query: str, results: list[dict]) -> None:
+    """Record implicit feedback + learning signals for each recall.
+
+    Non-blocking, non-critical — failures silently ignored.
+    Feeds: FeedbackCollector + Co-Retrieval + Confidence Boost.
+    """
+    try:
+        from pathlib import Path
+        engine = get_engine()
+        pid = engine.profile_id
+        slm_dir = Path.home() / ".superlocalmemory"
+        fact_ids = [r.get("fact_id", "") for r in results[:10] if r.get("fact_id")]
+        if not fact_ids:
+            return
+
+        # 1. Implicit feedback (recall_hit signals for adaptive learner)
+        try:
+            from superlocalmemory.learning.feedback import FeedbackCollector
+            collector = FeedbackCollector(slm_dir / "learning.db")
+            collector.record_implicit(
+                profile_id=pid, query=query,
+                fact_ids_returned=fact_ids, fact_ids_available=fact_ids,
+            )
+        except Exception:
+            pass
+
+        # 2. Co-retrieval signals (strengthen implicit graph edges)
+        try:
+            from superlocalmemory.learning.signals import LearningSignals
+            signals = LearningSignals(slm_dir / "learning.db")
+            signals.record_co_retrieval(pid, fact_ids)
+        except Exception:
+            pass
+
+        # 3. Confidence boost (accessed facts get +0.02, cap 1.0)
+        try:
+            from superlocalmemory.learning.signals import LearningSignals
+            mem_db = str(slm_dir / "memory.db")
+            for fid in fact_ids[:5]:
+                LearningSignals.boost_confidence(mem_db, fid)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def register_core_tools(server, get_engine: Callable) -> None:
     """Register the 13 core MCP tools on *server*."""
 
@@ -57,6 +103,11 @@ def register_core_tools(server, get_engine: Callable) -> None:
             pool = WorkerPool.shared()
             result = pool.recall(query, limit=limit)
             if result.get("ok"):
+                # Record implicit feedback: every returned result is a recall_hit
+                try:
+                    _record_recall_hits(get_engine, query, result.get("results", []))
+                except Exception:
+                    pass  # Feedback is non-critical, never block recall
                 return {
                     "success": True,
                     "results": result.get("results", []),

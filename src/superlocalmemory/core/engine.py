@@ -460,6 +460,15 @@ class MemoryEngine:
                 except Exception as exc:
                     logger.debug("Agentic sufficiency skipped: %s", exc)
 
+        # Adaptive re-ranking (V3.1 Active Memory)
+        # Phase 1 (< 50 signals): no change (cross-encoder order preserved)
+        # Phase 2 (50+): heuristic boosts (recency, access, trust)
+        # Phase 3 (200+): LightGBM ML ranking
+        try:
+            response = self._apply_adaptive_ranking(response, query, pid)
+        except Exception as exc:
+            logger.debug("Adaptive ranking skipped: %s", exc)
+
         # Reconsolidation: access updates trust + count (neuroscience principle)
         if self._trust_scorer:
             for r in response.results:
@@ -613,6 +622,60 @@ class MemoryEngine:
     def _ensure_init(self) -> None:
         if not self._initialized:
             self.initialize()
+
+    def _apply_adaptive_ranking(self, response, query: str, pid: str):
+        """Apply adaptive re-ranking if enough learning signals exist.
+
+        Phase 1 (< 50 signals): returns response unchanged (backward compat).
+        Phase 2 (50+): heuristic boosts from recency, access count, trust.
+        Phase 3 (200+): LightGBM ML-based reranking.
+        """
+        from superlocalmemory.learning.feedback import FeedbackCollector
+        from pathlib import Path
+
+        learning_db = Path.home() / ".superlocalmemory" / "learning.db"
+        if not learning_db.exists():
+            return response
+
+        collector = FeedbackCollector(learning_db)
+        signal_count = collector.get_feedback_count(pid)
+
+        if signal_count < 50:
+            return response  # Phase 1: no change
+
+        from superlocalmemory.learning.ranker import AdaptiveRanker
+        ranker = AdaptiveRanker(signal_count=signal_count)
+
+        result_dicts = []
+        for r in response.results:
+            result_dicts.append({
+                "score": r.score,
+                "cross_encoder_score": r.score,
+                "trust_score": r.trust_score,
+                "channel_scores": r.channel_scores or {},
+                "fact": {
+                    "age_days": 0,
+                    "access_count": r.fact.access_count,
+                },
+                "_original": r,
+            })
+
+        query_context = {"query_type": response.query_type}
+        reranked = ranker.rerank(result_dicts, query_context)
+
+        # Rebuild response with new ordering
+        new_results = [d["_original"] for d in reranked]
+
+        from superlocalmemory.storage.models import RecallResponse
+        return RecallResponse(
+            query=response.query,
+            mode=response.mode,
+            results=new_results,
+            query_type=response.query_type,
+            channel_weights=response.channel_weights,
+            total_candidates=response.total_candidates,
+            retrieval_time_ms=response.retrieval_time_ms,
+        )
 
     def _init_encoding(self) -> None:
         from superlocalmemory.encoding.fact_extractor import FactExtractor

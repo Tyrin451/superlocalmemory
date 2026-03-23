@@ -94,41 +94,19 @@ class Summarizer:
     # ------------------------------------------------------------------
 
     def _has_llm(self) -> bool:
-        """Check if LLM is available (AND warm for Ollama).
+        """Check if LLM is available.
 
-        For Mode B (Ollama): only returns True if the model is already
-        loaded in memory. NEVER triggers a cold model load — that would
-        spike 5+ GB of RAM on every recall, unacceptable on ≤32 GB machines.
+        Mode B: Ollama assumed running (num_ctx: 4096 caps memory at 5.5 GB).
+        Mode C: Requires API key for cloud provider.
         """
         if self._mode == "b":
-            return self._is_ollama_model_warm()
+            return True
         if self._mode == "c":
             return bool(
                 os.environ.get("OPENROUTER_API_KEY")
                 or getattr(self._config.llm, 'api_key', None)
             )
         return False
-
-    def _is_ollama_model_warm(self) -> bool:
-        """Check if the LLM model is already loaded in Ollama memory.
-
-        Queries Ollama /api/ps. Returns True only if our model is loaded,
-        preventing cold-load memory spikes during recall.
-        """
-        try:
-            import httpx
-            model = getattr(self._config.llm, 'model', None) or "llama3.1:8b"
-            model_base = model.split(":")[0]
-            with httpx.Client(timeout=httpx.Timeout(2.0)) as client:
-                resp = client.get("http://localhost:11434/api/ps")
-                if resp.status_code != 200:
-                    return False
-                for m in resp.json().get("models", []):
-                    if model_base in m.get("name", ""):
-                        return True
-            return False
-        except Exception:
-            return False
 
     def _call_llm(self, prompt: str, max_tokens: int = 200) -> str:
         """Route to Ollama (B) or OpenRouter (C)."""

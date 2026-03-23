@@ -339,6 +339,13 @@ async def recall_trace(request: Request):
             except Exception:
                 pass
 
+        # Record learning signals (non-blocking, non-critical)
+        try:
+            _record_learning_signals(query, result.get("results", []))
+        except Exception as _sig_exc:
+            import logging as _log
+            _log.getLogger(__name__).warning("Learning signal error: %s", _sig_exc)
+
         return {
             "query": query,
             "query_type": result.get("query_type", "unknown"),
@@ -349,6 +356,44 @@ async def recall_trace(request: Request):
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _record_learning_signals(query: str, results: list) -> None:
+    """Record feedback + co-retrieval + confidence boost for any recall."""
+    from pathlib import Path
+    from superlocalmemory.core.config import SLMConfig
+
+    slm_dir = Path.home() / ".superlocalmemory"
+    config = SLMConfig.load()
+    pid = config.active_profile
+    fact_ids = [r.get("fact_id", "") for r in results[:10] if r.get("fact_id")]
+    if not fact_ids:
+        return
+
+    try:
+        from superlocalmemory.learning.feedback import FeedbackCollector
+        collector = FeedbackCollector(slm_dir / "learning.db")
+        collector.record_implicit(
+            profile_id=pid, query=query,
+            fact_ids_returned=fact_ids, fact_ids_available=fact_ids,
+        )
+    except Exception:
+        pass
+
+    try:
+        from superlocalmemory.learning.signals import LearningSignals
+        signals = LearningSignals(slm_dir / "learning.db")
+        signals.record_co_retrieval(pid, fact_ids)
+    except Exception:
+        pass
+
+    try:
+        from superlocalmemory.learning.signals import LearningSignals
+        mem_db = str(slm_dir / "memory.db")
+        for fid in fact_ids[:5]:
+            LearningSignals.boost_confidence(mem_db, fid)
+    except Exception:
+        pass
 
 
 # ── Trust Dashboard ──────────────────────────────────────────
@@ -521,3 +566,51 @@ async def ide_connect(request: Request):
             return {"results": results}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Active Memory (V3.1) ────────────────────────────────────
+
+@router.get("/learning/signals")
+async def learning_signals():
+    """Get zero-cost learning signal statistics."""
+    try:
+        from superlocalmemory.learning.signals import LearningSignals
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.server.routes.helpers import DB_PATH
+        learning_db = DB_PATH.parent / "learning.db"
+        signals = LearningSignals(learning_db)
+        config = SLMConfig.load()
+        pid = config.active_profile
+        return {"success": True, **signals.get_signal_stats(pid)}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@router.post("/learning/consolidate")
+async def run_consolidation(request: Request):
+    """Run sleep-time consolidation. Body: {dry_run: true/false}."""
+    try:
+        body = await request.json()
+        dry_run = body.get("dry_run", False)
+        from superlocalmemory.learning.consolidation_worker import ConsolidationWorker
+        from superlocalmemory.core.config import SLMConfig
+        from superlocalmemory.server.routes.helpers import DB_PATH
+        worker = ConsolidationWorker(
+            memory_db=str(DB_PATH),
+            learning_db=str(DB_PATH.parent / "learning.db"),
+        )
+        config = SLMConfig.load()
+        stats = worker.run(config.active_profile, dry_run=dry_run)
+        return {"success": True, **stats}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@router.get("/hooks/status")
+async def hooks_status():
+    """Check if Claude Code hooks are installed."""
+    try:
+        from superlocalmemory.hooks.claude_code_hooks import check_status
+        return {"success": True, **check_status()}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}

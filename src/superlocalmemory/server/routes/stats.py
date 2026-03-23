@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .helpers import get_db_connection, dict_factory, get_active_profile, DB_PATH
+from .helpers import get_db_connection, dict_factory, get_active_profile, DB_PATH, MEMORY_DIR
 
 logger = logging.getLogger("superlocalmemory.routes.stats")
 router = APIRouter()
@@ -306,10 +306,38 @@ async def get_patterns():
 
         if not table_name:
             conn.close()
-            return {
-                "patterns": {}, "total_patterns": 0, "pattern_types": [],
-                "message": "Pattern learning not initialized.",
-            }
+            # Fall through to V3.1 behavioral pattern store
+            try:
+                from superlocalmemory.learning.behavioral import BehavioralPatternStore
+                store = BehavioralPatternStore(str(MEMORY_DIR / "learning.db"))
+                raw = store.get_patterns(profile_id=active_profile)
+                grouped = defaultdict(list)
+                for p in raw:
+                    meta = p.get("metadata", {})
+                    grouped[p["pattern_type"]].append({
+                        "pattern_type": p["pattern_type"],
+                        "key": meta.get("key", p.get("pattern_key", "")),
+                        "value": meta.get("value", p.get("pattern_key", "")),
+                        "confidence": p.get("confidence", 0),
+                        "evidence_count": p.get("evidence_count", 0),
+                    })
+                all_patterns = [p for ps in grouped.values() for p in ps]
+                confs = [p["confidence"] for p in all_patterns if p.get("confidence")]
+                return {
+                    "patterns": dict(grouped),
+                    "total_patterns": len(all_patterns),
+                    "pattern_types": list(grouped.keys()),
+                    "confidence_stats": {
+                        "avg": sum(confs) / len(confs) if confs else 0,
+                        "min": min(confs) if confs else 0,
+                        "max": max(confs) if confs else 0,
+                    },
+                }
+            except Exception:
+                return {
+                    "patterns": {}, "total_patterns": 0, "pattern_types": [],
+                    "message": "Pattern learning not initialized.",
+                }
 
         if table_name == 'identity_patterns':
             cursor.execute("""

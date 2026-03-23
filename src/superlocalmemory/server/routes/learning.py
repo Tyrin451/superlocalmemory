@@ -79,21 +79,44 @@ async def learning_status():
         active_profile = get_active_profile()
         result["active_profile"] = active_profile
 
-        # Ranking phase
-        result["ranking_phase"] = "baseline"
+        # Real signal count from V3.1 learning_feedback table
+        signal_count = 0
+        try:
+            from superlocalmemory.learning.feedback import FeedbackCollector
+            from pathlib import Path
+            learning_db = Path.home() / ".superlocalmemory" / "learning.db"
+            if learning_db.exists():
+                collector = FeedbackCollector(learning_db)
+                signal_count = collector.get_feedback_count(active_profile)
+        except Exception:
+            pass
 
-        # Feedback stats
+        # Ranking phase based on real signal count
+        if signal_count >= 200:
+            result["ranking_phase"] = "ml_model"
+        elif signal_count >= 20:
+            result["ranking_phase"] = "rule_based"
+        else:
+            result["ranking_phase"] = "baseline"
+
+        # Feedback stats — merge old system + new V3.1 signals
+        stats_dict = {"feedback_count": signal_count, "active_profile": active_profile}
         feedback = _get_feedback()
         if feedback:
             try:
-                summary = feedback.get_feedback_summary()
-                result["stats"] = summary
-                result["profile_feedback"] = {
-                    "profile": active_profile,
-                    "signals": summary.get("total_signals", 0),
-                }
+                old_stats = feedback.get_feedback_summary()
+                if isinstance(old_stats, dict):
+                    old_stats["feedback_count"] = signal_count
+                    old_stats["active_profile"] = active_profile
+                    stats_dict = old_stats
             except Exception as exc:
                 logger.debug("feedback summary: %s", exc)
+
+        result["stats"] = stats_dict
+        result["profile_feedback"] = {
+            "profile": active_profile,
+            "signals": signal_count,
+        }
 
         # Engagement
         engagement = _get_engagement()
@@ -105,9 +128,43 @@ async def learning_status():
         else:
             result["engagement"] = None
 
-        # Tech preferences (stub until learning DB populated)
-        result["tech_preferences"] = []
-        result["workflow_patterns"] = []
+        # Tech preferences + workflow patterns from V3.1 behavioral store
+        try:
+            from superlocalmemory.learning.behavioral import BehavioralPatternStore
+            from pathlib import Path
+            learning_db = Path.home() / ".superlocalmemory" / "learning.db"
+            if learning_db.exists():
+                store = BehavioralPatternStore(str(learning_db))
+                all_patterns = store.get_patterns(profile_id=active_profile)
+                tech = [
+                    {"key": "tech", "value": p.get("metadata", {}).get("value", p.get("pattern_key", "")),
+                     "confidence": p.get("confidence", 0), "evidence": p.get("evidence_count", 0)}
+                    for p in all_patterns if p.get("pattern_type") == "tech_preference"
+                ]
+                workflows = [
+                    {"type": p.get("pattern_type"), "key": p.get("pattern_key", ""),
+                     "value": p.get("metadata", {}).get("value", ""),
+                     "confidence": p.get("confidence", 0)}
+                    for p in all_patterns if p.get("pattern_type") in ("temporal", "interest")
+                ]
+                result["tech_preferences"] = tech
+                result["workflow_patterns"] = workflows
+
+                # Privacy stats
+                import os
+                db_size = os.path.getsize(str(learning_db)) // 1024 if learning_db.exists() else 0
+                stats_dict["db_size_kb"] = db_size
+                stats_dict["transferable_patterns"] = len(all_patterns)
+                stats_dict["models_trained"] = 1 if signal_count >= 200 else 0
+                stats_dict["tracked_sources"] = len(set(
+                    p.get("pattern_type") for p in all_patterns
+                ))
+            else:
+                result["tech_preferences"] = []
+                result["workflow_patterns"] = []
+        except Exception:
+            result["tech_preferences"] = []
+            result["workflow_patterns"] = []
         result["source_scores"] = {}
 
     except Exception as e:

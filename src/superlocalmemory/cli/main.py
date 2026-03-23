@@ -170,6 +170,19 @@ def main() -> None:
     profile_p.add_argument("name", nargs="?", help="Profile name")
     profile_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 
+    # -- Active Memory (V3.1) ------------------------------------------
+    hooks_p = sub.add_parser("hooks", help="Manage Claude Code hooks for auto memory injection")
+    hooks_p.add_argument(
+        "action", nargs="?", default="status",
+        choices=["install", "remove", "status"], help="Action (default: status)",
+    )
+
+    ctx_p = sub.add_parser("session-context", help="Print session context (for hooks)")
+    ctx_p.add_argument("query", nargs="?", default="", help="Optional context query")
+
+    obs_p = sub.add_parser("observe", help="Auto-capture content (pipe or argument)")
+    obs_p.add_argument("content", nargs="?", default="", help="Content to evaluate")
+
     args = parser.parse_args()
 
     if not args.command:

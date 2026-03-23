@@ -37,6 +37,9 @@ def dispatch(args: Namespace) -> None:
         "warmup": cmd_warmup,
         "dashboard": cmd_dashboard,
         "profile": cmd_profile,
+        "hooks": cmd_hooks,
+        "session-context": cmd_session_context,
+        "observe": cmd_observe,
     }
     handler = handlers.get(args.command)
     if handler:
@@ -763,3 +766,96 @@ def cmd_profile(args: Namespace) -> None:
         )
         ensure_profile_in_json(args.name)
         print(f"Created profile: {args.name}")
+
+
+# -- Active Memory commands (V3.1) ------------------------------------------
+
+
+def cmd_hooks(args: Namespace) -> None:
+    """Manage Claude Code hooks for invisible memory injection."""
+    from superlocalmemory.hooks.claude_code_hooks import (
+        install_hooks, remove_hooks, check_status,
+    )
+
+    action = getattr(args, "action", "status")
+    if action == "install":
+        result = install_hooks()
+        if result["scripts"] and result["settings"]:
+            print("SLM hooks installed in Claude Code.")
+            print("Memory context will auto-inject on every new session.")
+        else:
+            print(f"Installation incomplete: {result['errors']}")
+    elif action == "remove":
+        result = remove_hooks()
+        if result["scripts"] and result["settings"]:
+            print("SLM hooks removed from Claude Code.")
+        else:
+            print(f"Removal incomplete: {result['errors']}")
+    else:
+        result = check_status()
+        if result["installed"]:
+            print("SLM hooks: INSTALLED")
+            print(f"  Scripts: {result['hooks_dir']}")
+            print("  Claude Code settings: configured")
+        else:
+            print("SLM hooks: NOT INSTALLED")
+            print("  Run: slm hooks install")
+
+
+def cmd_session_context(args: Namespace) -> None:
+    """Print session context (for hook scripts and piping)."""
+    from superlocalmemory.hooks.auto_recall import AutoRecall
+    from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.core.engine import MemoryEngine
+
+    try:
+        config = SLMConfig.load()
+        engine = MemoryEngine(config)
+        engine.initialize()
+
+        auto = AutoRecall(
+            engine=engine,
+            config={"enabled": True, "max_memories_injected": 10, "relevance_threshold": 0.3},
+        )
+        context = auto.get_session_context(
+            query=getattr(args, "query", "") or "recent decisions and important context",
+        )
+        if context:
+            print(context)
+    except Exception as exc:
+        logger.debug("session-context failed: %s", exc)
+
+
+def cmd_observe(args: Namespace) -> None:
+    """Evaluate and auto-capture content from stdin or argument."""
+    import sys
+    from superlocalmemory.hooks.auto_capture import AutoCapture
+    from superlocalmemory.core.config import SLMConfig
+    from superlocalmemory.core.engine import MemoryEngine
+
+    content = getattr(args, "content", "") or ""
+    if not content and not sys.stdin.isatty():
+        content = sys.stdin.read().strip()
+
+    if not content:
+        print("No content to observe.")
+        return
+
+    try:
+        config = SLMConfig.load()
+        engine = MemoryEngine(config)
+        engine.initialize()
+
+        auto = AutoCapture(engine=engine)
+        decision = auto.evaluate(content)
+
+        if decision.capture:
+            stored = auto.capture(content, category=decision.category)
+            if stored:
+                print(f"Auto-captured: {decision.category} (confidence: {decision.confidence:.2f})")
+            else:
+                print(f"Detected {decision.category} but store failed.")
+        else:
+            print(f"Not captured: {decision.reason}")
+    except Exception as exc:
+        logger.debug("observe failed: %s", exc)

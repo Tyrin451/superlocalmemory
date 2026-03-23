@@ -20,7 +20,32 @@ logger = logging.getLogger(__name__)
 
 
 def register_resources(server, get_engine: Callable) -> None:
-    """Register 6 MCP resources on *server*."""
+    """Register 7 MCP resources on *server*."""
+
+    # ------------------------------------------------------------------
+    # 0. slm://context — Active Memory auto-injection
+    # ------------------------------------------------------------------
+    @server.resource("slm://context")
+    async def session_context() -> str:
+        """Active session context — auto-injected on MCP connect.
+
+        Returns the most relevant memories for the current session:
+        recent decisions, active patterns, and project context.
+        AI tools read this automatically on connection to get instant context.
+        """
+        try:
+            from superlocalmemory.hooks.auto_recall import AutoRecall
+            engine = get_engine()
+            auto = AutoRecall(
+                engine=engine,
+                config={"enabled": True, "max_memories_injected": 10, "relevance_threshold": 0.3},
+            )
+            context = auto.get_session_context(query="recent decisions and important context")
+            if not context:
+                return "No session context available yet. Use 'remember' to store memories."
+            return context
+        except Exception as exc:
+            return f"Context unavailable: {exc}"
 
     # ------------------------------------------------------------------
     # 1. slm://recent

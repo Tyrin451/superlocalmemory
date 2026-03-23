@@ -45,9 +45,18 @@ async def behavioral_status():
         recent_outcomes = []
         try:
             tracker = OutcomeTracker(db_path)
-            total_outcomes = tracker.get_outcome_count(profile=profile)
-            outcome_breakdown = tracker.get_outcome_breakdown(profile=profile)
-            recent_outcomes = tracker.get_recent_outcomes(profile=profile, limit=20)
+            all_outcomes = tracker.get_outcomes(profile_id=profile, limit=50)
+            total_outcomes = len(all_outcomes)
+            for o in all_outcomes:
+                key = o.outcome if hasattr(o, 'outcome') else str(o)
+                if key in outcome_breakdown:
+                    outcome_breakdown[key] += 1
+            recent_outcomes = [
+                {"outcome": o.outcome, "action_type": o.action_type,
+                 "timestamp": o.timestamp}
+                for o in all_outcomes[:20]
+                if hasattr(o, 'outcome')
+            ]
         except Exception as exc:
             logger.debug("outcome tracker: %s", exc)
 
@@ -56,8 +65,8 @@ async def behavioral_status():
         cross_project_transfers = 0
         try:
             store = BehavioralPatternStore(db_path)
-            patterns = store.get_patterns(profile=profile)
-            cross_project_transfers = store.get_cross_project_count(profile=profile)
+            patterns = store.get_patterns(profile_id=profile)
+            cross_project_transfers = 0
         except Exception as exc:
             logger.debug("pattern store: %s", exc)
 
@@ -69,6 +78,12 @@ async def behavioral_status():
             "patterns": patterns,
             "cross_project_transfers": cross_project_transfers,
             "recent_outcomes": recent_outcomes,
+            "stats": {
+                "success_count": outcome_breakdown.get("success", 0),
+                "failure_count": outcome_breakdown.get("failure", 0),
+                "partial_count": outcome_breakdown.get("partial", 0),
+                "patterns_count": len(patterns),
+            },
         }
     except Exception as e:
         logger.error("behavioral_status error: %s", e)
