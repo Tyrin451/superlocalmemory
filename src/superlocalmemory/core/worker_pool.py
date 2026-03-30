@@ -155,19 +155,13 @@ class WorkerPool:
                 self._proc.stdin.write(req_line)
                 self._proc.stdin.flush()
 
-                # Read response with timeout
-                import selectors
-                sel = selectors.DefaultSelector()
-                sel.register(self._proc.stdout, selectors.EVENT_READ)
-                ready = sel.select(timeout=timeout)
-                sel.close()
+                # Read response with timeout using a thread.
+                # selectors/select do NOT work with pipes on Windows,
+                # so we use the same thread-based approach as EmbeddingService.
+                resp_line = self._readline_with_timeout(
+                    self._proc.stdout, timeout,
+                )
 
-                if not ready:
-                    logger.error("Worker timed out after %ds", _REQUEST_TIMEOUT)
-                    self._kill()
-                    return {"ok": False, "error": "Worker timed out"}
-
-                resp_line = self._proc.stdout.readline()
                 if not resp_line:
                     logger.warning("Worker returned empty, restarting. Run 'slm doctor' to diagnose.")
                     self._kill()
@@ -180,6 +174,35 @@ class WorkerPool:
                 logger.warning("Worker communication failed: %s. Run 'slm doctor' to diagnose.", exc)
                 self._kill()
                 return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _readline_with_timeout(stream, timeout_seconds: float) -> str:
+        """Read one line from *stream* with a timeout.
+
+        Uses a daemon thread so the call never blocks the main thread
+        indefinitely. This is the cross-platform replacement for
+        ``selectors`` which fails on Windows pipes.
+
+        Returns the line read, or ``""`` on timeout / error.
+        """
+        result_container: list[str] = []
+        error_container: list[Exception] = []
+
+        def _read() -> None:
+            try:
+                result_container.append(stream.readline())
+            except Exception as exc:
+                error_container.append(exc)
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(timeout=timeout_seconds)
+
+        if reader.is_alive():
+            return ""
+        if error_container:
+            raise error_container[0]
+        return result_container[0] if result_container else ""
 
     def _ensure_worker(self) -> None:
         """Spawn worker if not running."""

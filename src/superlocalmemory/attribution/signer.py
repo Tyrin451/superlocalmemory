@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import sys
 from datetime import datetime, timezone
 from typing import Dict
 
@@ -35,7 +36,11 @@ def _get_or_create_key() -> str:
         os.makedirs(os.path.dirname(key_path), exist_ok=True)
         with open(key_path, "w") as f:
             f.write(key)
-        os.chmod(key_path, 0o600)
+        # On POSIX, restrict the key file to owner-only read/write.
+        # On Windows, os.chmod only supports setting the read-only flag
+        # and cannot enforce Unix-style permissions, so we skip it.
+        if sys.platform != "win32":
+            os.chmod(key_path, 0o600)
         return key
 
 _DEFAULT_KEY: str = _get_or_create_key()

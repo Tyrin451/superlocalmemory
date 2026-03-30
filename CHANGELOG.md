@@ -16,6 +16,28 @@ SuperLocalMemory V3 - Intelligent local memory system for AI coding assistants.
 
 ---
 
+## [3.2.2] - 2026-03-30
+
+### Added
+- Performance improvements for retrieval pipeline
+- New memory management capabilities with configurable lifecycle controls
+- Enhanced dashboard with 3 additional monitoring tabs
+- 9 new API endpoints for configuration and status
+- 5 new MCP tools for proactive memory operations
+- 5 new CLI commands for configuration management
+
+### Changed
+- Internal retrieval architecture optimized with additional search channel
+- Schema extensions for improved data management (9 new tables)
+- Memory surfacing engine with multi-signal scoring
+
+### Performance
+- Significant latency reduction in recall operations (vector-indexed retrieval)
+- Idle-time memory optimization for large stores
+- Reduced memory footprint for long-running sessions
+
+---
+
 ## [3.2.1] - 2026-03-26
 
 ### Fixed
@@ -359,7 +381,7 @@ We use [Semantic Versioning](https://semver.org/):
 - **MINOR:** New features (backward compatible, e.g., 2.0.0 → 2.1.0)
 - **PATCH:** Bug fixes (backward compatible, e.g., 2.1.0 → 2.1.1)
 
-**Current Version:** v2.8.0
+**Current Version:** v3.2.2
 **Website:** [superlocalmemory.com](https://superlocalmemory.com)
 **npm:** `npm install -g superlocalmemory`
 

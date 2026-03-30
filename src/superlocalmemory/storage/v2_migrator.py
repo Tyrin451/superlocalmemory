@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import shutil
 import sqlite3
+import sys
 from datetime import datetime, UTC
 from pathlib import Path
 
@@ -390,8 +391,29 @@ class V2Migrator:
                 original_backup = self._home / ".claude-memory-v2-original"
                 if not original_backup.exists():
                     self._v2_base.rename(original_backup)
-                    self._v2_base.symlink_to(self._v3_base)
-                    stats["steps"].append("Created symlink: .claude-memory -> .superlocalmemory")
+                    try:
+                        if sys.platform == "win32":
+                            # On Windows, symlinks require admin privileges.
+                            # Use a directory junction instead (works without elevation).
+                            import subprocess
+                            subprocess.run(
+                                ["cmd", "/c", "mklink", "/J",
+                                 str(self._v2_base), str(self._v3_base)],
+                                check=True, capture_output=True,
+                            )
+                        else:
+                            self._v2_base.symlink_to(self._v3_base)
+                        stats["steps"].append(
+                            "Created symlink: .claude-memory -> .superlocalmemory"
+                        )
+                    except (OSError, subprocess.CalledProcessError) as exc:
+                        logger.warning(
+                            "Could not create symlink/junction: %s. "
+                            "V2 backward compatibility link skipped.", exc,
+                        )
+                        stats["steps"].append(
+                            f"Symlink skipped (OS error: {exc})"
+                        )
                 else:
                     stats["steps"].append("Symlink skipped (backup dir already exists)")
             else:

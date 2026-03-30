@@ -23,3 +23,17 @@ def test_v3_api_has_routes():
     assert "/api/v3/auto-recall/config" in route_paths
     assert "/api/v3/ide/status" in route_paths
     assert "/api/v3/ide/connect" in route_paths
+
+
+def test_v3_api_has_v32_routes():
+    """Verify all 9 Phase 6 V3.2 API routes are registered."""
+    from superlocalmemory.server.routes.v3_api import router
+    route_paths = [r.path for r in router.routes]
+    assert "/api/v3/auto-invoke/config" in route_paths
+    assert "/api/v3/associations" in route_paths
+    assert "/api/v3/associations/stats" in route_paths
+    assert "/api/v3/consolidation/status" in route_paths
+    assert "/api/v3/consolidation/trigger" in route_paths
+    assert "/api/v3/core-memory" in route_paths
+    assert "/api/v3/core-memory/{block_id}" in route_paths
+    assert "/api/v3/vector-store/status" in route_paths

@@ -2,7 +2,7 @@
   <img src="https://superlocalmemory.com/assets/logo-mark.png" alt="SuperLocalMemory" width="200"/>
 </p>
 
-<h1 align="center">SuperLocalMemory V3</h1>
+<h1 align="center">SuperLocalMemory V3.2</h1>
 <p align="center"><strong>The first local-only AI memory to break 74% retrieval on LoCoMo.<br/>No cloud. No APIs. No data leaves your machine.</strong></p>
 
 <p align="center">
@@ -44,6 +44,66 @@ Mode A scores **74.8% with zero cloud dependency** — outperforming Mem0 by 16 
 Mathematical layers contribute **+12.7 percentage points** on average across 6 conversations (n=832 questions), with up to **+19.9pp on the most challenging dialogues**. This isn't more compute — it's better math.
 
 > **Upgrading from V2 (2.8.6)?** V3 is a complete architectural reinvention — new mathematical engine, new retrieval pipeline, new storage schema. Your existing data is preserved but requires migration. After installing V3, run `slm migrate` to upgrade your data. Read the [Migration Guide](https://github.com/qualixar/superlocalmemory/wiki/Migration-from-V2) before upgrading. Backup is created automatically.
+
+---
+
+## What's New in V3.2 — The Living Brain
+
+> Your AI agent now remembers the way humans do: associatively, temporally, and with consolidation during idle time. V3.2 transforms SLM from a retrieval engine into a living memory system that surfaces what you need before you ask for it.
+
+### Headline Features
+
+**100x Faster Recall** — Retrieval latency drops from ~500ms to <10ms at 10K facts. Vector KNN search replaces full-table scan. You feel the difference on the first query.
+
+**Automatic Memory Surfacing** — Memories now come to you. A multi-signal scoring engine (similarity + recency + frequency + trust) proactively injects relevant context at session start and during conversations. No more "I forgot we decided that last week."
+
+**Associative Retrieval (5th Channel)** — V3 had 4 retrieval channels. V3.2 adds a 5th: multi-hop spreading activation across your knowledge graph. Ask about "deployment" and it surfaces the related database migration decision three hops away.
+
+**Temporal Intelligence** — Facts now carry time-awareness. Bi-temporal validity tracks when something was true vs. when it was recorded. Contradictions are detected automatically: "We use Postgres" + "We migrated to MySQL" triggers a conflict resolution flow.
+
+**Sleep-Time Consolidation** — During idle periods, SLM compresses, deduplicates, and reorganizes your memory store. Redundant facts merge. Clusters tighten. Important memories get promoted to Core Memory blocks that stay permanently in context (inspired by Letta's core memory, but fully local).
+
+**Core Memory Blocks** — Pin your most critical context (architecture decisions, team conventions, project constraints) into always-available working memory. These blocks are injected into every session automatically — your agent never starts cold.
+
+### By the Numbers
+
+| Metric | V3.0 | V3.2 | Change |
+|:-------|:----:|:----:|:------:|
+| Recall latency (10K facts) | ~500ms | <10ms | **100x faster** |
+| Retrieval channels | 4 | 5 | +spreading activation |
+| MCP tools | 24 | 29 | +5 new |
+| CLI commands | 16 | 21 | +5 new |
+| Dashboard tabs | 17 | 20 | +3 new |
+| API endpoints | — | 9 new | configuration & status |
+| DB tables | 9 | 18 | +9 for temporal, consolidation, core memory |
+
+### Enable V3.2 Features
+
+All new features default OFF. Zero breaking changes. Opt in when ready:
+
+```bash
+# Turn on automatic memory surfacing
+slm config set auto_invoke.enabled true
+
+# Turn on sleep-time consolidation
+slm config set consolidation.enabled true
+
+# Turn on temporal intelligence
+slm config set temporal.enabled true
+
+# Turn on associative retrieval (5th channel)
+slm config set retrieval.synapse.enabled true
+```
+
+Or enable everything at once:
+
+```bash
+slm config set v32_features.all true
+```
+
+**Fully backward compatible.** All 29 MCP tools, 21 CLI commands work the same. Existing data untouched. New features activate only when you flip the switch.
+
+> **V3.2 Paper** — Technical details, formal guarantees, and benchmark results in the upcoming companion paper. Watch the [arXiv page](https://arxiv.org/abs/2603.14588) for updates.
 
 ---
 
