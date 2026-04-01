@@ -498,7 +498,7 @@ class EntityResolver:
                 max_tokens=256,
                 temperature=0.0,
             )
-            match = re.search(r"\{.*\}", response, re.DOTALL)
+            match = re.search(r"\{[^}]*\}", response)
             if not match:
                 return {}
 

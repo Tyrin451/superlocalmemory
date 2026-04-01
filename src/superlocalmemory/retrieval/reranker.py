@@ -2,10 +2,13 @@
 # Licensed under the MIT License - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""SuperLocalMemory V3 — Cross-Encoder Reranker.
+"""SuperLocalMemory V3 — Cross-Encoder Reranker (Subprocess-Isolated).
 
-Scores (query, fact) pairs through a cross-encoder in a single forward
-pass. Lazy model loading, thread-safe via lock.
+V3.3.3: All PyTorch/ONNX model work runs in a SEPARATE subprocess.
+The main process (dashboard, MCP, CLI) NEVER imports torch and stays
+at ~60 MB. Same isolation pattern as EmbeddingService.
+
+The worker subprocess auto-kills after 2 minutes idle.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
 License: MIT
@@ -13,49 +16,33 @@ License: MIT
 
 from __future__ import annotations
 
+import json
 import logging
-import platform
-import struct
+import os
+import subprocess
 import sys
 import threading
+import time
 from typing import Any
 
 from superlocalmemory.storage.models import AtomicFact
 
 logger = logging.getLogger(__name__)
 
-
-def _detect_onnx_variant() -> str:
-    """Auto-detect the best ONNX model variant for the current platform.
-
-    Returns the file_name parameter for CrossEncoder model_kwargs.
-    Platform detection:
-    - macOS ARM64 (Apple Silicon): qint8_arm64
-    - x86_64 with AVX2: quint8_avx2
-    - Everything else: default model.onnx (float32, works everywhere)
-    """
-    arch = platform.machine().lower()
-    is_64bit = struct.calcsize("P") * 8 == 64
-
-    if sys.platform == "darwin" and arch in ("arm64", "aarch64"):
-        return "onnx/model_qint8_arm64.onnx"
-
-    if arch in ("x86_64", "amd64") and is_64bit:
-        return "onnx/model_quint8_avx2.onnx"
-
-    return "onnx/model.onnx"
+_IDLE_TIMEOUT_SECONDS = 120  # 2 min → kill worker
+_SUBPROCESS_RESPONSE_TIMEOUT = 120  # 120s for ONNX cold start
+_WORKER_RECYCLE_AFTER = 500  # Recycle after N requests
 
 
 class CrossEncoderReranker:
     """Rerank candidate facts using a local cross-encoder model.
 
-    V3.3.2: Uses ONNX backend by default (~200MB) instead of full PyTorch
-    (~1.5GB). Three-tier fallback: ONNX → PyTorch → no reranking.
-    Auto-detects the optimal quantized ONNX variant per platform.
+    V3.3.3: SUBPROCESS-ISOLATED. The main process never imports
+    sentence_transformers or torch. All model work runs in a child
+    process via JSON over stdin/stdout.
 
-    When the model is unavailable (missing package, download failure,
-    offline environment), falls back to returning candidates in their
-    original score order — never crashes.
+    Non-blocking first-use: triggers background worker spawn, returns
+    fallback scores until worker is ready.
 
     Args:
         model_name: HuggingFace cross-encoder model identifier.
@@ -70,106 +57,207 @@ class CrossEncoderReranker:
     ) -> None:
         self._model_name = model_name
         self._backend = backend
-        self._model: Any = None
-        self._loaded = False
-        self._loading = False  # True while background load is in progress
-        self._active_backend: str = ""
+        self._worker_proc: subprocess.Popen | None = None
+        self._model_loaded = False  # True once worker confirms model is ready
+        self._worker_loading = False  # True while background warmup in progress
         self._lock = threading.Lock()
+        self._idle_timer: threading.Timer | None = None
+        self._request_count: int = 0
+
+        # Start background warmup immediately — worker loads model
+        # while the rest of init continues. First recall gets instant
+        # fallback; second recall uses the warm model.
+        self._start_background_warmup()
 
     # ------------------------------------------------------------------
-    # Lazy loading (non-blocking)
+    # Background warmup (non-blocking model load)
     # ------------------------------------------------------------------
 
-    def _ensure_model(self) -> None:
-        """Trigger model load in background (non-blocking).
+    def _start_background_warmup(self) -> None:
+        """Start worker and load model in background thread.
 
-        On first call, starts loading in a background thread and returns
-        immediately. The model becomes available for subsequent calls
-        once loading completes. This prevents the 30s ONNX cold start
-        from blocking the first recall request.
-
-        Three-tier fallback:
-        1. ONNX backend with platform-optimal quantization — ~100-200MB RAM
-        2. PyTorch backend (requires torch) — ~1.5GB RAM
-        3. No model (graceful degradation) — 0 RAM
+        Returns immediately. The worker loads the model in parallel
+        with the rest of engine initialization and the first recall.
         """
-        if self._loaded:
+        if self._worker_loading or self._model_loaded:
             return
+        self._worker_loading = True
 
-        with self._lock:
-            if self._loaded or self._loading:
-                return
-            self._loading = True
+        def _warmup() -> None:
+            try:
+                self._ensure_worker()
+                if self._worker_proc is None:
+                    return
+                # Send load command and wait for response
+                req = json.dumps({
+                    "cmd": "load",
+                    "model_name": self._model_name,
+                    "backend": self._backend,
+                }) + "\n"
+                self._worker_proc.stdin.write(req)
+                self._worker_proc.stdin.flush()
+                resp_line = self._readline_with_timeout(
+                    self._worker_proc.stdout, _SUBPROCESS_RESPONSE_TIMEOUT,
+                )
+                if resp_line:
+                    resp = json.loads(resp_line)
+                    if resp.get("ok"):
+                        self._model_loaded = True
+                        logger.info(
+                            "Reranker worker warm (backend=%s)",
+                            resp.get("backend", "?"),
+                        )
+                        self._reset_idle_timer()
+            except Exception as exc:
+                logger.debug("Background reranker warmup failed: %s", exc)
+            finally:
+                self._worker_loading = False
 
-        # Load in background thread so first recall isn't blocked
-        loader = threading.Thread(
-            target=self._load_model, daemon=True, name="ce-loader",
-        )
-        loader.start()
+        t = threading.Thread(target=_warmup, daemon=True, name="ce-warmup")
+        t.start()
 
-    def _load_model(self) -> None:
-        """Actually load the model (runs in background thread)."""
+    # ------------------------------------------------------------------
+    # Worker management (mirrors EmbeddingService pattern)
+    # ------------------------------------------------------------------
+
+    def _ensure_worker(self) -> None:
+        """Spawn worker subprocess if not running. Non-blocking."""
+        if self._worker_proc is not None and self._worker_proc.poll() is None:
+            return
+        self._worker_proc = None
+        self._worker_ready = False
+
+        worker_module = "superlocalmemory.core.reranker_worker"
         try:
-            from sentence_transformers import CrossEncoder
-
-            if self._backend == "onnx":
-                try:
-                    onnx_file = _detect_onnx_variant()
-                    model = CrossEncoder(
-                        self._model_name,
-                        backend="onnx",
-                        model_kwargs={"file_name": onnx_file},
-                    )
-                    self._model = model
-                    self._active_backend = "onnx"
-                    logger.info(
-                        "Cross-encoder loaded (ONNX %s): %s",
-                        onnx_file, self._model_name,
-                    )
-                except Exception as onnx_exc:
-                    logger.info(
-                        "ONNX backend unavailable (%s), falling back to PyTorch",
-                        onnx_exc,
-                    )
-                    model = CrossEncoder(self._model_name)
-                    self._model = model
-                    self._active_backend = "pytorch"
-                    logger.info(
-                        "Cross-encoder loaded (PyTorch fallback): %s",
-                        self._model_name,
-                    )
-            else:
-                model = CrossEncoder(self._model_name)
-                self._model = model
-                self._active_backend = "pytorch"
-                logger.info("Cross-encoder loaded: %s", self._model_name)
-        except ImportError:
-            logger.warning(
-                "sentence-transformers not installed; "
-                "cross-encoder reranking disabled"
+            env = {
+                **os.environ,
+                "CUDA_VISIBLE_DEVICES": "",
+                "PYTORCH_MPS_HIGH_WATERMARK_RATIO": "0.0",
+                "PYTORCH_MPS_MEM_LIMIT": "0",
+                "PYTORCH_ENABLE_MPS_FALLBACK": "1",
+                "TOKENIZERS_PARALLELISM": "false",
+                "TORCH_DEVICE": "cpu",
+            }
+            self._worker_proc = subprocess.Popen(
+                [sys.executable, "-m", worker_module],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+                env=env,
+                start_new_session=True,
             )
-        except OSError as exc:
-            logger.warning(
-                "Failed to load cross-encoder %s: %s",
-                self._model_name,
-                exc,
+            logger.info(
+                "Reranker worker spawned (PID %d)", self._worker_proc.pid,
             )
-        finally:
-            self._loaded = True
-            self._loading = False
+            self._worker_ready = True
+        except Exception as exc:
+            logger.warning("Failed to spawn reranker worker: %s", exc)
+            self._worker_proc = None
 
-    def _ensure_model_blocking(self) -> None:
-        """Load model synchronously (blocks until ready).
+    def _send_request(self, req: dict, timeout: float | None = None) -> dict | None:
+        """Send JSON request to worker, get response. Thread-safe.
 
-        Used by warmup and is_available where we need the model NOW.
+        Uses a short timeout (10s) for rerank requests since the model
+        should already be loaded by the background warmup. Uses the full
+        timeout only for explicit load/ping commands.
         """
-        if self._loaded:
-            return
+        effective_timeout = timeout or _SUBPROCESS_RESPONSE_TIMEOUT
+
         with self._lock:
-            if self._loaded:
-                return
-            self._loading = True
-        self._load_model()
+            if self._request_count >= _WORKER_RECYCLE_AFTER and self._worker_proc is not None:
+                logger.info("Recycling reranker worker after %d requests", self._request_count)
+                self._kill_worker()
+                self._model_loaded = False
+                self._request_count = 0
+
+            # Ensure worker is alive (re-spawn if crashed)
+            if self._worker_proc is None or self._worker_proc.poll() is not None:
+                self._ensure_worker()
+            if self._worker_proc is None:
+                return None
+
+            try:
+                msg = json.dumps(req) + "\n"
+                self._worker_proc.stdin.write(msg)
+                self._worker_proc.stdin.flush()
+
+                resp_line = self._readline_with_timeout(
+                    self._worker_proc.stdout,
+                    effective_timeout,
+                )
+                if not resp_line:
+                    logger.warning("Reranker worker timed out after %ds", effective_timeout)
+                    self._kill_worker()
+                    self._model_loaded = False
+                    return None
+
+                resp = json.loads(resp_line)
+                self._reset_idle_timer()
+                self._request_count += 1
+                return resp
+            except (BrokenPipeError, OSError, json.JSONDecodeError) as exc:
+                logger.warning("Reranker worker communication failed: %s", exc)
+                self._kill_worker()
+                self._model_loaded = False
+                return None
+
+    @staticmethod
+    def _readline_with_timeout(stream: Any, timeout_seconds: float) -> str:
+        """Read a line from stream with timeout. Returns '' on timeout."""
+        result_container: list[str] = []
+        error_container: list[Exception] = []
+
+        def _read() -> None:
+            try:
+                result_container.append(stream.readline())
+            except Exception as exc:
+                error_container.append(exc)
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(timeout=timeout_seconds)
+
+        if reader.is_alive():
+            return ""
+        if error_container:
+            raise error_container[0]
+        return result_container[0] if result_container else ""
+
+    def _kill_worker(self) -> None:
+        """Terminate worker subprocess."""
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+        if self._worker_proc is not None:
+            try:
+                self._worker_proc.stdin.write('{"cmd":"quit"}\n')
+                self._worker_proc.stdin.flush()
+                self._worker_proc.wait(timeout=3)
+            except Exception:
+                try:
+                    self._worker_proc.kill()
+                except Exception:
+                    pass
+            self._worker_proc = None
+            self._worker_ready = False
+
+    def _reset_idle_timer(self) -> None:
+        """Reset idle timer — kills worker after 2 min inactivity."""
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+        self._idle_timer = threading.Timer(
+            _IDLE_TIMEOUT_SECONDS, self.unload,
+        )
+        self._idle_timer.daemon = True
+        self._idle_timer.start()
+
+    def unload(self) -> None:
+        """Kill the worker subprocess to free all memory."""
+        with self._lock:
+            self._kill_worker()
+            logger.info("CrossEncoderReranker: worker killed (idle timeout)")
 
     # ------------------------------------------------------------------
     # Public API
@@ -183,73 +271,62 @@ class CrossEncoderReranker:
     ) -> list[tuple[AtomicFact, float]]:
         """Rerank candidates by cross-encoder relevance.
 
-        Each (query, fact.content) pair is scored in a single forward
-        pass. Results are returned sorted by cross-encoder score.
-
-        When the model is unavailable, returns candidates sorted by
-        their existing score (graceful fallback).
-
-        Args:
-            query: User query text.
-            candidates: List of (AtomicFact, score) tuples from the
-                fusion stage.
-            top_k: Maximum results to return.
-
-        Returns:
-            Top-k (AtomicFact, cross_encoder_score) tuples, sorted
-            descending by cross-encoder score.
+        NON-BLOCKING: If the worker is still loading the model
+        (background warmup), returns candidates by existing score
+        immediately. Once the worker is warm, subsequent calls use
+        the cross-encoder. This means CLI first-call gets instant
+        results (without reranking), and MCP gets reranked results
+        (worker stays warm between calls).
         """
         if not candidates:
             return []
 
-        # Non-blocking: trigger background load if not yet started
-        self._ensure_model()
-
-        if self._model is None:
-            # Model not loaded yet (still loading in background or failed).
-            # Graceful fallback: return candidates sorted by existing score.
-            # Next recall will use the model once it's ready.
-            sorted_cands = sorted(
-                candidates, key=lambda x: x[1], reverse=True
-            )
+        # Non-blocking: if model isn't loaded yet, return fallback
+        if not self._model_loaded:
+            sorted_cands = sorted(candidates, key=lambda x: x[1], reverse=True)
             return sorted_cands[:top_k]
 
-        # Build (query, document) pairs for batch scoring
-        pairs: list[tuple[str, str]] = [
-            (query, fact.content) for fact, _ in candidates
-        ]
+        documents = [fact.content for fact, _ in candidates]
 
-        scores = self._model.predict(pairs)
+        # Short timeout (10s) — model should already be loaded by warmup.
+        # If worker crashed or is still loading, fallback immediately.
+        resp = self._send_request({
+            "cmd": "rerank",
+            "query": query,
+            "documents": documents,
+        }, timeout=10.0)
 
+        if resp is None or not resp.get("ok"):
+            # Fallback: return by existing score
+            sorted_cands = sorted(candidates, key=lambda x: x[1], reverse=True)
+            return sorted_cands[:top_k]
+
+        scores = resp["scores"]
         scored: list[tuple[AtomicFact, float]] = [
             (fact, float(score))
             for (fact, _), score in zip(candidates, scores)
         ]
-
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
 
     def score_pair(self, query: str, document: str) -> float:
-        """Score a single (query, document) pair.
+        """Score a single (query, document) pair."""
+        resp = self._send_request({
+            "cmd": "score",
+            "query": query,
+            "document": document,
+            "model_name": self._model_name,
+            "backend": self._backend,
+        })
 
-        Args:
-            query: Query text.
-            document: Document text.
-
-        Returns:
-            Relevance score (higher = more relevant). 0.0 if model
-            is unavailable.
-        """
-        self._ensure_model()
-
-        if self._model is None:
+        if resp is None or not resp.get("ok"):
             return 0.0
-
-        scores = self._model.predict([(query, document)])
-        return float(scores[0])
+        return float(resp.get("score", 0.0))
 
     @property
     def is_available(self) -> bool:
-        """Whether the cross-encoder model is loaded and ready."""
-        self._ensure_model_blocking()
-        return self._model is not None
+        """Whether the cross-encoder worker can be spawned."""
+        resp = self._send_request({"cmd": "ping"})
+        if resp is None:
+            return False
+        return resp.get("ok", False)

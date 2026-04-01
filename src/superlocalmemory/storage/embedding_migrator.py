@@ -36,11 +36,12 @@ _REINDEX_BATCH_SIZE = 50
 def _model_signature(config: SLMConfig) -> str:
     """Derive a deterministic signature from the active embedding config.
 
-    The signature combines provider + model_name + dimension so that
-    any change in embedding source is detected.
+    V3.3.4: Only model_name + dimension matter. Provider (sentence-transformers
+    vs ollama) doesn't change the embedding space when the model is the same.
+    This prevents spurious re-indexing when switching Mode A ↔ B.
     """
     emb = config.embedding
-    return f"{emb.provider}::{emb.model_name}::{emb.dimension}"
+    return f"{emb.model_name}::{emb.dimension}"
 
 
 def _read_stored_signature(config_dir: Path) -> str:

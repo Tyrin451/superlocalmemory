@@ -214,11 +214,17 @@ class CognitiveConsolidator:
     # Public API
     # ------------------------------------------------------------------
 
-    def run_pipeline(self, profile_id: str) -> CCQPipelineResult:
+    def run_pipeline(
+        self, profile_id: str, dry_run: bool = False,
+    ) -> CCQPipelineResult:
         """Execute the full 6-step CCQ pipeline.
 
         Per-cluster error isolation: one cluster failure does NOT
         abort the pipeline (HR-07).
+
+        Args:
+            profile_id: Target profile.
+            dry_run: If True, identify clusters but don't apply changes.
         """
         # Step 1: Identify candidates
         candidates = self._step1_identify(profile_id)
@@ -229,6 +235,18 @@ class CognitiveConsolidator:
         clusters = self._step2_cluster(candidates, profile_id)
         if not clusters:
             return self._empty_result()
+
+        if dry_run:
+            return CCQPipelineResult(
+                clusters_processed=len(clusters),
+                blocks_created=0,
+                facts_archived=len(candidates),
+                total_bytes_before=0,
+                total_bytes_after=0,
+                compression_ratio=0.0,
+                audit_entries=(),
+                errors=(),
+            )
 
         # Process each cluster
         blocks_created = 0

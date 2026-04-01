@@ -30,8 +30,11 @@ def _get_vader():
     if _vader_analyzer is not None:
         return _vader_analyzer
     try:
-        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-        _vader_analyzer = SentimentIntensityAnalyzer()
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning, module="vaderSentiment")
+            from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+            _vader_analyzer = SentimentIntensityAnalyzer()
     except ImportError:
         logger.warning("vaderSentiment not installed — emotional tagging disabled")
         _vader_analyzer = None

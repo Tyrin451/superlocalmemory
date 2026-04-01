@@ -142,8 +142,15 @@ class WorkerPool:
     # ------------------------------------------------------------------
 
     def _send(self, request: dict) -> dict:
-        """Send request to worker and get response. Thread-safe."""
-        return self._send_with_timeout(request, timeout=_REQUEST_TIMEOUT)
+        """Send request to worker and get response. Thread-safe.
+
+        Auto-retries once on worker death (idle timeout, crash).
+        """
+        resp = self._send_with_timeout(request, timeout=_REQUEST_TIMEOUT)
+        if not resp.get("ok") and "Worker" in resp.get("error", ""):
+            logger.info("Auto-restarting worker after failure, retrying request")
+            resp = self._send_with_timeout(request, timeout=_REQUEST_TIMEOUT)
+        return resp
 
     def _send_with_timeout(self, request: dict, timeout: float) -> dict:
         """Send request with configurable timeout. Thread-safe."""

@@ -4,23 +4,24 @@
 
 """Tests for superlocalmemory.retrieval.reranker — Cross-Encoder Reranker.
 
+V3.3.3: Tests for the subprocess-isolated architecture. The main process
+never imports torch/sentence_transformers. All model work runs in a child
+process via JSON over stdin/stdout.
+
 Covers:
-  - Lazy model loading (mocked sentence_transformers import)
-  - V3.3.2: ONNX backend loading + fallback to PyTorch
-  - rerank() with model available -> scored and sorted
-  - rerank() with model unavailable -> fallback to existing order
+  - Initialization (model name, backend, warmup trigger)
+  - Worker lifecycle (spawn, kill, respawn, idle timer)
+  - rerank() with worker available -> scored and sorted
+  - rerank() with worker unavailable -> fallback to existing scores
   - rerank() with empty candidates
-  - score_pair() with and without model
-  - is_available property
-  - active_backend tracking
-  - Thread-safe double-check loading pattern
-  - ImportError handling (sentence-transformers not installed)
-  - OSError handling (model download failure)
+  - score_pair() via worker subprocess
+  - is_available property (worker ping)
+  - Worker recycling after N requests
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -46,182 +47,223 @@ def _make_candidates(n: int = 3) -> list[tuple[AtomicFact, float]]:
     ]
 
 
+def _make_reranker(**kwargs) -> CrossEncoderReranker:
+    """Create a reranker with background warmup disabled (no real subprocess)."""
+    with patch.object(CrossEncoderReranker, "_start_background_warmup"):
+        return CrossEncoderReranker(**kwargs)
+
+
 # ---------------------------------------------------------------------------
-# Model loading
+# Initialization & warmup
 # ---------------------------------------------------------------------------
 
-class TestModelLoading:
-    def test_model_not_loaded_until_first_use(self) -> None:
-        reranker = CrossEncoderReranker("fake-model")
-        assert reranker._loaded is False
-        assert reranker._model is None
-
+class TestInitialization:
     def test_default_model_is_minilm(self) -> None:
         """V3.3.2: Default model is the lighter MiniLM-L-6."""
-        reranker = CrossEncoderReranker()
+        reranker = _make_reranker()
         assert reranker._model_name == "cross-encoder/ms-marco-MiniLM-L-6-v2"
         assert reranker._backend == "onnx"
 
-    @patch("superlocalmemory.retrieval.reranker.CrossEncoder", create=True)
-    def test_lazy_load_success(self, mock_ce_class: MagicMock) -> None:
-        mock_model = MagicMock()
-        mock_ce_class.return_value = mock_model
+    def test_model_not_loaded_at_init(self) -> None:
+        """Worker hasn't confirmed model ready yet."""
+        reranker = _make_reranker(model_name="fake-model")
+        assert reranker._model_loaded is False
+        assert reranker._worker_proc is None
 
-        with patch.dict(
-            "sys.modules",
-            {"sentence_transformers": MagicMock(CrossEncoder=mock_ce_class)},
+    def test_background_warmup_called_on_init(self) -> None:
+        """Constructor triggers background warmup."""
+        with patch.object(
+            CrossEncoderReranker, "_start_background_warmup",
+        ) as mock_warmup:
+            CrossEncoderReranker("fake-model")
+            mock_warmup.assert_called_once()
+
+    def test_custom_model_and_backend(self) -> None:
+        reranker = _make_reranker(model_name="test-model", backend="")
+        assert reranker._model_name == "test-model"
+        assert reranker._backend == ""
+
+
+# ---------------------------------------------------------------------------
+# Worker lifecycle
+# ---------------------------------------------------------------------------
+
+class TestWorkerManagement:
+    def test_ensure_worker_spawns_subprocess(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        with patch("subprocess.Popen", return_value=mock_proc):
+            reranker._ensure_worker()
+        assert reranker._worker_proc is mock_proc
+
+    def test_ensure_worker_noop_if_alive(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None  # Still alive
+        reranker._worker_proc = mock_proc
+        with patch("subprocess.Popen") as mock_popen:
+            reranker._ensure_worker()
+            mock_popen.assert_not_called()
+
+    def test_ensure_worker_respawns_if_dead(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        dead_proc = MagicMock()
+        dead_proc.poll.return_value = 1  # Exited
+        reranker._worker_proc = dead_proc
+        new_proc = MagicMock()
+        new_proc.poll.return_value = None
+        with patch("subprocess.Popen", return_value=new_proc):
+            reranker._ensure_worker()
+        assert reranker._worker_proc is new_proc
+
+    def test_ensure_worker_handles_spawn_failure(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        with patch("subprocess.Popen", side_effect=OSError("spawn failed")):
+            reranker._ensure_worker()
+        assert reranker._worker_proc is None
+
+    def test_kill_worker_sends_quit(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        mock_proc = MagicMock()
+        reranker._worker_proc = mock_proc
+        reranker._kill_worker()
+        mock_proc.stdin.write.assert_called_with('{"cmd":"quit"}\n')
+        mock_proc.wait.assert_called_once()
+        assert reranker._worker_proc is None
+
+    def test_kill_worker_force_kills_on_timeout(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        mock_proc = MagicMock()
+        mock_proc.stdin.write.side_effect = BrokenPipeError("pipe closed")
+        reranker._worker_proc = mock_proc
+        reranker._kill_worker()
+        mock_proc.kill.assert_called_once()
+        assert reranker._worker_proc is None
+
+    def test_unload_kills_worker(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        mock_proc = MagicMock()
+        reranker._worker_proc = mock_proc
+        reranker.unload()
+        assert reranker._worker_proc is None
+
+
+# ---------------------------------------------------------------------------
+# _send_request
+# ---------------------------------------------------------------------------
+
+class TestSendRequest:
+    def test_send_request_success(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        reranker._worker_proc = mock_proc
+
+        with patch.object(
+            reranker, "_readline_with_timeout",
+            return_value='{"ok": true, "scores": [0.9]}\n',
         ):
-            reranker = CrossEncoderReranker("test-model")
-            # Use blocking load for test determinism
-            reranker._ensure_model_blocking()
+            resp = reranker._send_request({"cmd": "ping"})
 
-        assert reranker._loaded is True
+        assert resp == {"ok": True, "scores": [0.9]}
 
-    def test_import_error_graceful(self) -> None:
-        """When sentence_transformers is not installed, model stays None."""
-        reranker = CrossEncoderReranker("fake-model")
-        with patch.dict("sys.modules", {"sentence_transformers": None}):
-            reranker._load_model()
-        assert reranker._loaded is True
-        assert reranker._model is None
+    def test_send_request_returns_none_on_timeout(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        reranker._worker_proc = mock_proc
 
-    def test_os_error_graceful(self) -> None:
-        """When model download fails, model stays None."""
-        reranker = CrossEncoderReranker("fake-model")
-        mock_st = MagicMock()
-        mock_st.CrossEncoder.side_effect = OSError("Download failed")
-        with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
-            reranker._load_model()
-        assert reranker._loaded is True
-        assert reranker._model is None
+        with patch.object(
+            reranker, "_readline_with_timeout", return_value="",
+        ):
+            resp = reranker._send_request({"cmd": "ping"})
 
+        assert resp is None
 
-# ---------------------------------------------------------------------------
-# V3.3.2: ONNX backend loading
-# ---------------------------------------------------------------------------
+    def test_send_request_returns_none_when_no_worker(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        reranker._worker_proc = None
+        with patch.object(reranker, "_ensure_worker"):
+            resp = reranker._send_request({"cmd": "ping"})
+        assert resp is None
 
-class TestONNXBackend:
-    def test_onnx_backend_success(self) -> None:
-        """When ONNX runtime is available, loads with backend='onnx' + platform variant."""
-        mock_st = MagicMock()
-        mock_model = MagicMock()
-        mock_st.CrossEncoder.return_value = mock_model
+    def test_send_request_handles_broken_pipe(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.stdin.write.side_effect = BrokenPipeError("pipe")
+        reranker._worker_proc = mock_proc
 
-        with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
-            reranker = CrossEncoderReranker("test-model", backend="onnx")
-            reranker._load_model()
-
-        assert reranker._model is mock_model
-        assert reranker._active_backend == "onnx"
-        call_kwargs = mock_st.CrossEncoder.call_args
-        assert call_kwargs[1]["backend"] == "onnx"
-        assert "file_name" in call_kwargs[1]["model_kwargs"]
-
-    def test_onnx_fallback_to_pytorch(self) -> None:
-        """When ONNX fails, falls back to PyTorch backend."""
-        mock_st = MagicMock()
-        mock_model = MagicMock()
-        call_count = 0
-
-        def _side_effect(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if kwargs.get("backend") == "onnx":
-                raise ImportError("onnxruntime not installed")
-            return mock_model
-
-        mock_st.CrossEncoder.side_effect = _side_effect
-
-        with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
-            reranker = CrossEncoderReranker("test-model", backend="onnx")
-            reranker._load_model()
-
-        assert reranker._model is mock_model
-        assert reranker._active_backend == "pytorch"
-        assert call_count == 2
-
-    def test_no_backend_uses_pytorch(self) -> None:
-        """When backend is empty, uses PyTorch directly."""
-        mock_st = MagicMock()
-        mock_model = MagicMock()
-        mock_st.CrossEncoder.return_value = mock_model
-
-        with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
-            reranker = CrossEncoderReranker("test-model", backend="")
-            reranker._load_model()
-
-        assert reranker._model is mock_model
-        assert reranker._active_backend == "pytorch"
-        mock_st.CrossEncoder.assert_called_once_with("test-model")
-
-    def test_both_backends_fail_graceful(self) -> None:
-        """When both ONNX and PyTorch fail, model stays None."""
-        mock_st = MagicMock()
-        mock_st.CrossEncoder.side_effect = OSError("All backends failed")
-
-        with patch.dict("sys.modules", {"sentence_transformers": mock_st}):
-            reranker = CrossEncoderReranker("test-model", backend="onnx")
-            reranker._load_model()
-
-        assert reranker._model is None
-        assert reranker._loaded is True
+        resp = reranker._send_request({"cmd": "ping"})
+        assert resp is None
+        assert reranker._model_loaded is False
 
 
 # ---------------------------------------------------------------------------
-# rerank() — model available
+# rerank() — worker available
 # ---------------------------------------------------------------------------
 
 class TestRerankWithModel:
-    def _make_reranker_with_model(self) -> CrossEncoderReranker:
-        reranker = CrossEncoderReranker("fake-model")
-        mock_model = MagicMock()
-        # predict returns scores in reverse order to test sorting
-        mock_model.predict.return_value = [0.1, 0.5, 0.9]
-        reranker._model = mock_model
-        reranker._loaded = True
-        return reranker
-
     def test_rerank_sorts_by_cross_encoder_score(self) -> None:
-        reranker = self._make_reranker_with_model()
+        reranker = _make_reranker(model_name="fake-model")
+        reranker._model_loaded = True
         candidates = _make_candidates(3)
-        results = reranker.rerank("query", candidates, top_k=10)
-        # Scores are [0.1, 0.5, 0.9] -> f2 (0.9) should be first
+
+        with patch.object(reranker, "_send_request", return_value={
+            "ok": True,
+            "scores": [0.1, 0.5, 0.9],
+        }):
+            results = reranker.rerank("query", candidates, top_k=10)
+
+        # Scores [0.1, 0.5, 0.9] -> f2 (0.9) should be first
         assert results[0][0].fact_id == "f2"
         assert results[0][1] == pytest.approx(0.9)
+        assert results[1][0].fact_id == "f1"
+        assert results[2][0].fact_id == "f0"
 
     def test_rerank_respects_top_k(self) -> None:
-        reranker = self._make_reranker_with_model()
+        reranker = _make_reranker(model_name="fake-model")
+        reranker._model_loaded = True
         candidates = _make_candidates(3)
-        results = reranker.rerank("query", candidates, top_k=2)
+
+        with patch.object(reranker, "_send_request", return_value={
+            "ok": True,
+            "scores": [0.1, 0.5, 0.9],
+        }):
+            results = reranker.rerank("query", candidates, top_k=2)
+
         assert len(results) == 2
 
-    def test_rerank_passes_correct_pairs(self) -> None:
-        reranker = self._make_reranker_with_model()
+    def test_rerank_passes_correct_documents(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        reranker._model_loaded = True
         candidates = [
             (_make_fact("f1", "doc one"), 0.5),
             (_make_fact("f2", "doc two"), 0.3),
         ]
-        reranker._model.predict.return_value = [0.8, 0.4]
-        reranker.rerank("my query", candidates)
-        # Check that predict was called with (query, content) pairs
-        call_args = reranker._model.predict.call_args[0][0]
-        assert call_args[0] == ("my query", "doc one")
-        assert call_args[1] == ("my query", "doc two")
+
+        with patch.object(reranker, "_send_request", return_value={
+            "ok": True,
+            "scores": [0.8, 0.4],
+        }) as mock_send:
+            reranker.rerank("my query", candidates)
+
+        req = mock_send.call_args[0][0]
+        assert req["cmd"] == "rerank"
+        assert req["query"] == "my query"
+        assert req["documents"] == ["doc one", "doc two"]
 
 
 # ---------------------------------------------------------------------------
-# rerank() — model unavailable (fallback)
+# rerank() — fallback (worker not ready or failed)
 # ---------------------------------------------------------------------------
 
 class TestRerankFallback:
-    def _make_reranker_no_model(self) -> CrossEncoderReranker:
-        reranker = CrossEncoderReranker("fake-model")
-        reranker._model = None
-        reranker._loaded = True
-        return reranker
-
-    def test_fallback_returns_sorted_by_existing_score(self) -> None:
-        reranker = self._make_reranker_no_model()
+    def test_fallback_when_model_not_loaded(self) -> None:
+        """When worker hasn't loaded model yet, return by existing score."""
+        reranker = _make_reranker(model_name="fake-model")
+        reranker._model_loaded = False
         candidates = [
             (_make_fact("f1"), 0.3),
             (_make_fact("f2"), 0.9),
@@ -231,8 +273,31 @@ class TestRerankFallback:
         assert results[0][0].fact_id == "f2"
         assert results[1][0].fact_id == "f3"
 
+    def test_fallback_when_worker_returns_none(self) -> None:
+        """When worker crashes or times out, return by existing score."""
+        reranker = _make_reranker(model_name="fake-model")
+        reranker._model_loaded = True
+        candidates = _make_candidates(3)
+
+        with patch.object(reranker, "_send_request", return_value=None):
+            results = reranker.rerank("query", candidates)
+
+        # Fallback: sorted by existing score, f0 (0.5) > f1 (0.4) > f2 (0.3)
+        assert results[0][0].fact_id == "f0"
+
+    def test_fallback_when_worker_returns_error(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+        reranker._model_loaded = True
+        candidates = _make_candidates(3)
+
+        with patch.object(reranker, "_send_request", return_value={"ok": False}):
+            results = reranker.rerank("query", candidates)
+
+        assert results[0][0].fact_id == "f0"
+
     def test_fallback_respects_top_k(self) -> None:
-        reranker = self._make_reranker_no_model()
+        reranker = _make_reranker(model_name="fake-model")
+        reranker._model_loaded = False
         candidates = _make_candidates(5)
         results = reranker.rerank("query", candidates, top_k=2)
         assert len(results) == 2
@@ -244,9 +309,8 @@ class TestRerankFallback:
 
 class TestRerankEmpty:
     def test_empty_candidates_returns_empty(self) -> None:
-        reranker = CrossEncoderReranker("fake-model")
-        reranker._model = MagicMock()
-        reranker._loaded = True
+        reranker = _make_reranker(model_name="fake-model")
+        reranker._model_loaded = True
         assert reranker.rerank("query", []) == []
 
 
@@ -255,22 +319,40 @@ class TestRerankEmpty:
 # ---------------------------------------------------------------------------
 
 class TestScorePair:
-    def test_score_pair_with_model(self) -> None:
-        reranker = CrossEncoderReranker("fake-model")
-        mock_model = MagicMock()
-        mock_model.predict.return_value = [0.75]
-        reranker._model = mock_model
-        reranker._loaded = True
+    def test_score_pair_with_worker(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
 
-        score = reranker.score_pair("query", "document text")
+        with patch.object(reranker, "_send_request", return_value={
+            "ok": True,
+            "score": 0.75,
+        }):
+            score = reranker.score_pair("query", "document text")
+
         assert score == pytest.approx(0.75)
-        mock_model.predict.assert_called_once_with([("query", "document text")])
 
-    def test_score_pair_without_model(self) -> None:
-        reranker = CrossEncoderReranker("fake-model")
-        reranker._model = None
-        reranker._loaded = True
-        assert reranker.score_pair("query", "doc") == 0.0
+    def test_score_pair_worker_failure(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+
+        with patch.object(reranker, "_send_request", return_value=None):
+            score = reranker.score_pair("query", "doc")
+
+        assert score == 0.0
+
+    def test_score_pair_sends_correct_request(self) -> None:
+        reranker = _make_reranker(model_name="test-model", backend="onnx")
+
+        with patch.object(reranker, "_send_request", return_value={
+            "ok": True,
+            "score": 0.5,
+        }) as mock_send:
+            reranker.score_pair("my query", "my doc")
+
+        req = mock_send.call_args[0][0]
+        assert req["cmd"] == "score"
+        assert req["query"] == "my query"
+        assert req["document"] == "my doc"
+        assert req["model_name"] == "test-model"
+        assert req["backend"] == "onnx"
 
 
 # ---------------------------------------------------------------------------
@@ -278,14 +360,24 @@ class TestScorePair:
 # ---------------------------------------------------------------------------
 
 class TestIsAvailable:
-    def test_available_when_model_loaded(self) -> None:
-        reranker = CrossEncoderReranker("fake-model")
-        reranker._model = MagicMock()
-        reranker._loaded = True
-        assert reranker.is_available is True
+    def test_available_when_worker_responds(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
 
-    def test_not_available_when_model_none(self) -> None:
-        reranker = CrossEncoderReranker("fake-model")
-        reranker._model = None
-        reranker._loaded = True
-        assert reranker.is_available is False
+        with patch.object(
+            reranker, "_send_request", return_value={"ok": True},
+        ):
+            assert reranker.is_available is True
+
+    def test_not_available_when_worker_fails(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+
+        with patch.object(reranker, "_send_request", return_value=None):
+            assert reranker.is_available is False
+
+    def test_not_available_when_worker_returns_error(self) -> None:
+        reranker = _make_reranker(model_name="fake-model")
+
+        with patch.object(
+            reranker, "_send_request", return_value={"ok": False},
+        ):
+            assert reranker.is_available is False

@@ -113,6 +113,10 @@ def cmd_mode(args: Namespace) -> None:
         if (config.embedding.provider != updated.embedding.provider
                 or config.embedding.model_name != updated.embedding.model_name):
             print("  ⚠ Embedding model changed. Re-indexing will run on next recall.")
+
+        # V3.3.4: Warn if Mode C lacks cloud API key
+        if args.value == "c" and not updated.llm.api_key:
+            print("  ⚠ Mode C requires a cloud API key. Run: slm provider set")
     else:
         print(f"Current mode: {config.mode.value.upper()}")
 
@@ -356,12 +360,20 @@ def cmd_forget(args: Namespace) -> None:
             sys.exit(1)
         raise
 
+    dry_run = getattr(args, 'dry_run', False)
+
     if use_json:
         from superlocalmemory.cli.json_output import json_print
         if not matches:
             json_print("forget", data={"matched_count": 0, "deleted_count": 0, "matches": []})
             return
         match_items = [{"fact_id": f.fact_id, "content": f.content[:120]} for f in matches[:20]]
+        if dry_run:
+            json_print("forget", data={
+                "matched_count": len(matches), "deleted_count": 0,
+                "dry_run": True, "matches": match_items,
+            })
+            return
         if getattr(args, 'yes', False):
             for f in matches:
                 engine._db.delete_fact(f.fact_id)
@@ -387,6 +399,9 @@ def cmd_forget(args: Namespace) -> None:
     print(f"Found {len(matches)} matching memories:")
     for f in matches[:10]:
         print(f"  - {f.fact_id[:8]}... {f.content[:80]}")
+    if dry_run:
+        print(f"(dry run — {len(matches)} would be deleted)")
+        return
     if getattr(args, 'yes', False):
         for f in matches:
             engine._db.delete_fact(f.fact_id)
@@ -861,7 +876,8 @@ def cmd_trace(args: Namespace) -> None:
     try:
         config = SLMConfig.load()
         engine = MemoryEngine(config)
-        response = engine.recall(args.query, limit=5)
+        limit = getattr(args, 'limit', 10)
+        response = engine.recall(args.query, limit=limit)
     except Exception as exc:
         if use_json:
             from superlocalmemory.cli.json_output import json_print
@@ -1435,6 +1451,7 @@ def cmd_consolidate(args: Namespace) -> None:
 
     use_json = getattr(args, "json", False)
     cognitive = getattr(args, "cognitive", False)
+    dry_run = getattr(args, "dry_run", False)
     profile = getattr(args, "profile", "")
 
     if not cognitive:
@@ -1460,7 +1477,7 @@ def cmd_consolidate(args: Namespace) -> None:
         )
 
         consolidator = CognitiveConsolidator(db=engine._db)
-        result = consolidator.run_pipeline(pid)
+        result = consolidator.run_pipeline(pid, dry_run=dry_run)
     except Exception as exc:
         if use_json:
             from superlocalmemory.cli.json_output import json_print
@@ -1473,7 +1490,7 @@ def cmd_consolidate(args: Namespace) -> None:
     if use_json:
         from superlocalmemory.cli.json_output import json_print
         json_print("consolidate", data={
-            "clusters_found": result.clusters_found,
+            "clusters_processed": result.clusters_processed,
             "blocks_created": result.blocks_created,
             "facts_archived": result.facts_archived,
             "compression_ratio": round(result.compression_ratio, 3),
@@ -1484,7 +1501,7 @@ def cmd_consolidate(args: Namespace) -> None:
         return
 
     print("CCQ Cognitive Consolidation")
-    print(f"  Clusters found:     {result.clusters_found}")
+    print(f"  Clusters processed: {result.clusters_processed}")
     print(f"  Blocks created:     {result.blocks_created}")
     print(f"  Facts archived:     {result.facts_archived}")
     print(f"  Compression ratio:  {result.compression_ratio:.3f}")

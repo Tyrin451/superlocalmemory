@@ -123,6 +123,7 @@ def main() -> None:
 
     forget_p = sub.add_parser("forget", help="Delete memories matching a query (fuzzy)")
     forget_p.add_argument("query", help="Query to match for deletion")
+    forget_p.add_argument("--dry-run", action="store_true", default=False, help="Preview matches without deleting")
     forget_p.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
     forget_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 
@@ -151,6 +152,7 @@ def main() -> None:
 
     trace_p = sub.add_parser("trace", help="Recall with per-channel score breakdown")
     trace_p.add_argument("query", help="Search query")
+    trace_p.add_argument("--limit", type=int, default=10, help="Max results (default 10)")
     trace_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")
 
     # -- Diagnostics (continued) ----------------------------------------
@@ -216,6 +218,10 @@ def main() -> None:
     consolidate_p.add_argument(
         "--cognitive", action="store_true",
         help="Run CCQ cognitive consolidation",
+    )
+    consolidate_p.add_argument(
+        "--dry-run", action="store_true", default=False,
+        help="Preview without applying",
     )
     consolidate_p.add_argument("--profile", default="", help="Target profile")
     consolidate_p.add_argument("--json", action="store_true", help="Output structured JSON (agent-native)")

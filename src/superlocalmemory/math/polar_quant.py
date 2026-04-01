@@ -103,7 +103,9 @@ class PolarQuantEncoder:
         """
         path_str = self._config.rotation_matrix_path
         if not path_str:
-            path_str = str(Path.home() / ".superlocalmemory" / "polar_rotation.npy")
+            path_str = str(
+                Path.home() / ".superlocalmemory" / f"polar_rotation_{self._d}.npy",
+            )
 
         path = Path(path_str)
 

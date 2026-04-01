@@ -170,7 +170,7 @@ class TestSLMConfigForMode:
         assert cfg.embedding.dimension == 3072
         assert cfg.embedding.deployment_name == "embed-deploy"
         assert cfg.llm.is_available is True
-        assert cfg.llm.provider == "azure"
+        assert cfg.llm.provider == "openrouter"
         # Mode C has boosted channel weights
         assert cfg.channel_weights.semantic == 1.5
         assert cfg.retrieval.semantic_top_k == 80
@@ -244,11 +244,15 @@ class TestV332OnnxCrossEncoderConfig:
         assert data["retrieval"]["cross_encoder_model"] == "cross-encoder/ms-marco-MiniLM-L-6-v2"
         assert data["retrieval"]["cross_encoder_backend"] == "onnx"
 
-    def test_load_migrates_pre_332_config(self, tmp_path: Path) -> None:
-        """Pre-3.3.2 configs (no cross_encoder_backend) auto-upgrade."""
+    def test_load_migrates_pre_332_config_respects_explicit_false(self, tmp_path: Path) -> None:
+        """Pre-3.3.2 configs with explicit use_cross_encoder=False keep it.
+
+        V3.3.3 fix: the old migration force-overwrote False→True, causing
+        a 15 GB memory leak (sentence_transformers imports torch in main
+        process). Now we respect the user's explicit setting.
+        """
         import json
         cfg_path = tmp_path / "config.json"
-        # Simulate a pre-3.3.2 config with cross-encoder disabled
         old_config = {
             "mode": "a",
             "active_profile": "default",
@@ -264,10 +268,32 @@ class TestV332OnnxCrossEncoderConfig:
         }
         cfg_path.write_text(json.dumps(old_config))
         loaded = SLMConfig.load(cfg_path)
-        # Should be auto-upgraded to ONNX cross-encoder
-        assert loaded.retrieval.use_cross_encoder is True
+        # Explicit False is RESPECTED — not overwritten
+        assert loaded.retrieval.use_cross_encoder is False
+        # Backend field still added so migration won't trigger again
         assert loaded.retrieval.cross_encoder_backend == "onnx"
         assert loaded.retrieval.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    def test_load_auto_enables_ce_when_absent(self, tmp_path: Path) -> None:
+        """Pre-3.3.2 configs WITHOUT use_cross_encoder get it auto-enabled."""
+        import json
+        cfg_path = tmp_path / "config.json"
+        old_config = {
+            "mode": "a",
+            "active_profile": "default",
+            "llm": {"provider": "", "model": ""},
+            "embedding": {
+                "model_name": "nomic-ai/nomic-embed-text-v1.5",
+                "dimension": 768,
+                "provider": "sentence-transformers",
+            },
+            "retrieval": {"rrf_k": 60},
+        }
+        cfg_path.write_text(json.dumps(old_config))
+        loaded = SLMConfig.load(cfg_path)
+        # When use_cross_encoder is absent, setdefault enables it
+        assert loaded.retrieval.use_cross_encoder is True
+        assert loaded.retrieval.cross_encoder_backend == "onnx"
 
     def test_load_respects_post_332_config(self, tmp_path: Path) -> None:
         """Post-3.3.2 configs with explicit backend are respected."""

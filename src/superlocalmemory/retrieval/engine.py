@@ -83,6 +83,10 @@ class RetrievalEngine:
         self._bridge = bridge_discovery
         self._trust_scorer = trust_scorer
 
+        # V3.3.4: LRU cache for query embeddings (avoids redundant Ollama API calls)
+        self._query_embedding_cache: dict[str, list[float]] = {}
+        self._cache_max_size = 64
+
         # V3.2: ChannelRegistry for self-registration (Phase 0.5)
         from superlocalmemory.retrieval.channel_registry import ChannelRegistry
         self._registry = ChannelRegistry()
@@ -189,6 +193,21 @@ class RetrievalEngine:
 
     # -- Channel execution --------------------------------------------------
 
+    def _embed_query(self, query: str) -> list[float] | None:
+        """Embed query with LRU cache. Avoids redundant Ollama/API calls."""
+        if self._embedder is None:
+            return None
+        cached = self._query_embedding_cache.get(query)
+        if cached is not None:
+            return cached
+        emb = self._embedder.embed(query)
+        # Evict oldest if cache full
+        if len(self._query_embedding_cache) >= self._cache_max_size:
+            oldest = next(iter(self._query_embedding_cache))
+            del self._query_embedding_cache[oldest]
+        self._query_embedding_cache[query] = emb
+        return emb
+
     def _run_channels(
         self, query: str, profile_id: str, strat: QueryStrategy,
     ) -> dict[str, list[tuple[str, float]]]:
@@ -197,9 +216,20 @@ class RetrievalEngine:
         # Skip channels listed in disabled_channels (ablation support)
         disabled = set(self._config.disabled_channels)
 
-        if self._semantic is not None and self._embedder is not None and "semantic" not in disabled:
+        # V3.3.4: Embed query ONCE, reuse for semantic + hopfield channels
+        q_emb: list[float] | None = None
+        needs_embedding = (
+            (self._semantic is not None and "semantic" not in disabled)
+            or (self._hopfield is not None and "hopfield" not in disabled)
+        )
+        if needs_embedding:
             try:
-                q_emb = self._embedder.embed(query)
+                q_emb = self._embed_query(query)
+            except Exception as exc:
+                logger.warning("Query embedding failed: %s", exc)
+
+        if self._semantic is not None and q_emb is not None and "semantic" not in disabled:
+            try:
                 r = self._semantic.search(q_emb, profile_id, self._config.semantic_top_k)
                 if r:
                     out["semantic"] = r
@@ -231,13 +261,11 @@ class RetrievalEngine:
                 logger.warning("Temporal channel: %s", exc)
 
         # Phase G: Hopfield channel (6th) — energy-based pattern completion
-        if self._hopfield is not None and "hopfield" not in disabled:
+        if self._hopfield is not None and q_emb is not None and "hopfield" not in disabled:
             try:
-                q_emb = self._embedder.embed(query) if self._embedder else None
-                if q_emb is not None:
-                    r = self._hopfield.search(q_emb, profile_id, self._config.hopfield_top_k)
-                    if r:
-                        out["hopfield"] = r
+                r = self._hopfield.search(q_emb, profile_id, self._config.hopfield_top_k)
+                if r:
+                    out["hopfield"] = r
             except Exception as exc:
                 logger.warning("Hopfield channel: %s", exc)
 

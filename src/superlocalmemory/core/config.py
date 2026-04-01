@@ -612,15 +612,15 @@ class SLMConfig:
 
         rt = data.get("retrieval", {})
         if rt:
-            # V3.3.2 migration: auto-enable ONNX cross-encoder.
-            # Pre-3.3.2 configs had use_cross_encoder=False because the
-            # PyTorch cross-encoder used ~1.5GB RAM. With ONNX backend
-            # (~200MB), it's now safe for all modes. Detect old configs
-            # by the absence of cross_encoder_backend field.
+            # V3.3.2 migration: add ONNX cross-encoder backend field.
+            # Pre-3.3.2 configs lacked cross_encoder_backend. Add it,
+            # but NEVER override an explicit use_cross_encoder setting.
+            # The user's explicit choice always wins.
             if "cross_encoder_backend" not in rt:
-                rt["use_cross_encoder"] = True
-                rt["cross_encoder_model"] = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                rt.setdefault("cross_encoder_model", "cross-encoder/ms-marco-MiniLM-L-6-v2")
                 rt["cross_encoder_backend"] = "onnx"
+                # Only auto-enable if user didn't explicitly set the field
+                rt.setdefault("use_cross_encoder", True)
             config.retrieval = RetrievalConfig(**{
                 k: v for k, v in rt.items()
                 if k in RetrievalConfig.__dataclass_fields__
@@ -768,6 +768,9 @@ class SLMConfig:
             )
 
         # Mode C — FULL POWER, UNRESTRICTED
+        # Don't carry over local-only providers (ollama) to cloud mode
+        c_provider = llm_provider if llm_provider not in ("ollama", "") else "openrouter"
+        c_model = llm_model if llm_provider not in ("ollama", "") else "anthropic/claude-sonnet-4"
         return cls(
             mode=mode,
             base_dir=_base,
@@ -779,8 +782,8 @@ class SLMConfig:
                 deployment_name=embedding_deployment,
             ),
             llm=LLMConfig(
-                provider=llm_provider or "azure",
-                model=llm_model or "gpt-4.1-mini",
+                provider=c_provider,
+                model=c_model,
                 api_key=llm_api_key,
                 api_base=llm_api_base,
             ),
