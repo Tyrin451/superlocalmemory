@@ -107,10 +107,11 @@ class TestModelSignature:
         sig2 = _model_signature(cfg)
         assert sig1 == sig2
 
-    def test_different_provider(self, tmp_path):
+    def test_different_provider_same_signature(self, tmp_path):
+        """V3.3.4+: provider doesn't affect signature — same model = same space."""
         cfg_a = _make_config(tmp_path, provider="sentence-transformers")
         cfg_b = _make_config(tmp_path, provider="ollama")
-        assert _model_signature(cfg_a) != _model_signature(cfg_b)
+        assert _model_signature(cfg_a) == _model_signature(cfg_b)
 
     def test_different_model(self, tmp_path):
         cfg_a = _make_config(tmp_path, model_name="model-a")
@@ -123,12 +124,13 @@ class TestModelSignature:
         assert _model_signature(cfg_a) != _model_signature(cfg_b)
 
     def test_format(self, tmp_path):
+        """V3.3.4+: signature is model_name::dimension (provider excluded)."""
         cfg = _make_config(
             tmp_path, provider="ollama",
             model_name="nomic", dimension=768,
         )
         sig = _model_signature(cfg)
-        assert sig == "ollama::nomic::768"
+        assert sig == "nomic::768"
 
 
 # ---------------------------------------------------------------------------
@@ -201,11 +203,12 @@ class TestCheckEmbeddingMigration:
         cfg_b = _make_config(tmp_path, dimension=3072)
         assert check_embedding_migration(cfg_b) is True
 
-    def test_provider_change_triggers_migration(self, tmp_path):
+    def test_provider_change_no_migration(self, tmp_path):
+        """V3.3.4+: provider change alone doesn't trigger migration."""
         cfg_a = _make_config(tmp_path, provider="ollama")
         check_embedding_migration(cfg_a)
         cfg_b = _make_config(tmp_path, provider="sentence-transformers")
-        assert check_embedding_migration(cfg_b) is True
+        assert check_embedding_migration(cfg_b) is False
 
 
 # ---------------------------------------------------------------------------
@@ -254,12 +257,13 @@ class TestRunEmbeddingMigration:
         emb.embed_batch.assert_called_once()
 
     def test_updates_signature_after_migration(self, tmp_path):
-        cfg = _make_config(tmp_path, provider="new-provider")
+        """V3.3.4+: signature is model_name::dimension (no provider)."""
+        cfg = _make_config(tmp_path, provider="new-provider", model_name="test-model", dimension=512)
         db = _make_mock_db(facts=[])
         emb = _make_mock_embedder()
         run_embedding_migration(cfg, db, emb)
         stored = _read_stored_signature(tmp_path)
-        assert "new-provider" in stored
+        assert "test-model::512" in stored
 
     def test_embed_batch_failure_stops_gracefully(self, tmp_path):
         facts = [("f1", "content 1")]
