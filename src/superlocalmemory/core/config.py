@@ -86,10 +86,10 @@ class LLMConfig:
 class ChannelWeights:
     """Retrieval channel weights — 5 channels, query-adaptive."""
 
-    # Entity-linked facts are high-precision matches that rank above BM25.
-    semantic: float = 1.2
+    # Semantic should dominate for conversational retrieval (paraphrase matters most).
+    semantic: float = 1.5
     bm25: float = 1.0
-    entity_graph: float = 1.3
+    entity_graph: float = 1.0
     temporal: float = 1.0
     spreading_activation: float = 1.0  # Phase 3: 5th channel (BC-08: default value)
     hopfield: float = 0.8  # Phase G: 6th channel (Hopfield associative memory)
@@ -143,7 +143,7 @@ class RetrievalConfig:
     """Configuration for the retrieval (recall) pipeline."""
 
     # Fusion
-    rrf_k: int = 60               # RRF smoothing constant (D116: k=60 for diversity)
+    rrf_k: int = 15               # RRF smoothing constant (k=15 for candidate pools of 50-200)
     top_k: int = 20               # Final results to return
 
     # Per-channel
@@ -740,6 +740,9 @@ class SLMConfig:
                 retrieval=RetrievalConfig(
                     # V3.3.2: ONNX cross-encoder enabled for all modes (~200MB)
                     use_cross_encoder=True,
+                    # Mode A is zero-LLM: disable agentic retrieval (it replaces
+                    # precision-tuned fusion with crude heuristic expansions)
+                    agentic_max_rounds=0,
                 ),
                 math=MathConfig(
                     sheaf_contradiction_threshold=0.45,  # 768d threshold

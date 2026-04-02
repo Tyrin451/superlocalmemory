@@ -442,6 +442,8 @@ CREATE INDEX IF NOT EXISTS idx_edges_target
     ON graph_edges (profile_id, target_id);
 CREATE INDEX IF NOT EXISTS idx_edges_type
     ON graph_edges (profile_id, edge_type);
+CREATE INDEX IF NOT EXISTS idx_edges_exists_check
+    ON graph_edges (profile_id, source_id, target_id, edge_type);
 """
 
 

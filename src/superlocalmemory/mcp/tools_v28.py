@@ -181,8 +181,8 @@ def register_v28_tools(server, get_engine: Callable) -> None:
         """
         try:
             engine = get_engine()
-            from superlocalmemory.learning.behavioral import BehavioralStore
-            store = BehavioralStore(engine._db.db_path)
+            from superlocalmemory.learning.behavioral import BehavioralPatternStore
+            store = BehavioralPatternStore(engine._db.db_path)
             patterns = store.get_patterns(engine.profile_id, limit=limit)
             summary = store.get_summary(engine.profile_id)
             return {

@@ -84,7 +84,8 @@ _INTERVAL_RE = re.compile(
 )
 
 _ENTITY_RE = re.compile(
-    r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,3})\b"  # Capitalized word sequences
+    r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,3})\b"    # Capitalized word sequences
+    r"|\b([A-Z]{2,})\b"                              # ALL-CAPS abbreviations (NYU, MIT)
 )
 
 _QUOTED_RE = re.compile(r'"([^"]+)"')  # Quoted strings as entities
@@ -243,7 +244,7 @@ def _extract_entities(text: str) -> list[str]:
 
     # Capitalized word sequences (proper nouns)
     for match in _ENTITY_RE.finditer(text):
-        candidate = match.group(1).strip()
+        candidate = (match.group(1) or match.group(2) or "").strip()
         # Filter common English words that start sentences
         # Check first word of multi-word candidates against stop list
         _first_word = candidate.split()[0].lower() if candidate else ""
@@ -495,10 +496,17 @@ class FactExtractor:
     ) -> list[AtomicFact]:
         """Rule-based extraction: regex entities, keyword classification, scoring."""
         combined = "\n".join(turns)
-        sentences = _split_sentences(combined)
-        if not sentences:
-            # If no proper sentences, treat each turn as a sentence
-            sentences = [t.strip() for t in turns if len(t.strip()) >= 8]
+        raw_sentences = _split_sentences(combined)
+        if not raw_sentences:
+            raw_sentences = [t.strip() for t in turns if len(t.strip()) >= 8]
+
+        # V3.3.12: Sliding window of 2 sentences to preserve cross-sentence context.
+        # "She enrolled at NYU. Starting January 2024." → becomes one combined fact.
+        sentences = list(raw_sentences)  # Keep originals
+        for i in range(len(raw_sentences) - 1):
+            pair = raw_sentences[i].rstrip() + " " + raw_sentences[i + 1].lstrip()
+            if len(pair) <= 300:  # Only combine if not too long
+                sentences.append(pair)
 
         # Build entity frequency map for importance scoring
         entity_freq: dict[str, int] = {}
@@ -549,8 +557,8 @@ class FactExtractor:
             if importance < self._config.min_fact_confidence:
                 continue
 
-            # Determine speaker from turn position heuristic
-            speaker = self._infer_speaker(normalized, turns, speaker_a, speaker_b)
+            # V3.3.12: Speaker inference removed — result was never stored in AtomicFact.
+            # The speaker info is preserved in verbatim facts via [Speaker]: prefix.
 
             facts.append(AtomicFact(
                 fact_id=_new_id(),

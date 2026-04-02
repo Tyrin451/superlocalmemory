@@ -31,10 +31,10 @@ _MIN_FEEDBACK_FOR_TRAINING = 20
 
 # Default channel weights (before learning)
 _DEFAULT_WEIGHTS = {
-    "semantic": 1.2,
+    "semantic": 1.5,
     "bm25": 1.0,
     "entity_graph": 1.0,
-    "temporal": 0.8,
+    "temporal": 1.0,
 }
 
 

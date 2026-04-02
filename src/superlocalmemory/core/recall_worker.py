@@ -187,10 +187,28 @@ def _handle_update_memory(fact_id: str, content: str, agent_id: str = "system") 
     if not rows:
         return {"ok": False, "error": f"Memory {fact_id} not found"}
     old_content = dict(rows[0]).get("content", "")[:80]
-    engine._db.execute(
-        "UPDATE atomic_facts SET content = ? WHERE fact_id = ?",
-        (content, fact_id),
-    )
+    # V3.3.12: Re-embed updated content so semantic search + BM25 stay consistent.
+    # Previously only the text column was updated, leaving stale embeddings.
+    updates: dict = {"content": content}
+    if engine._embedder:
+        try:
+            new_emb = engine._embedder.embed(content)
+            if new_emb:
+                updates["embedding"] = new_emb
+                fm, fv = engine._embedder.compute_fisher_params(new_emb)
+                updates["fisher_mean"] = fm
+                updates["fisher_variance"] = fv
+        except Exception:
+            pass
+    engine._db.update_fact(fact_id, updates)
+    # Update BM25 index for the new content
+    if hasattr(engine, '_retrieval_engine') and engine._retrieval_engine:
+        bm25 = getattr(engine._retrieval_engine, '_bm25', None)
+        if bm25:
+            try:
+                bm25.add(fact_id, content, pid)
+            except Exception:
+                pass
     import logging as _logging
     _logging.getLogger("superlocalmemory.audit").info(
         "UPDATE fact_id=%s by agent=%s old=%s new=%s",

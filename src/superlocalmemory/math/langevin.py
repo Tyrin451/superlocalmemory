@@ -178,6 +178,19 @@ class LangevinDynamics:
         # --- Drift: -lambda^{-2} * grad_U * dt (Eq. 5 term 1) ---
         drift = -(lam_inv ** 2) * grad * self.dt
 
+        # --- V3.3.12: Ebbinghaus forgetting drift (Eq. 6 in Paper 3) ---
+        # λ(m) = 1/S(m) pushes toward boundary (forgetting) based on memory strength.
+        # S(m) is computed from access_count + importance. Higher S → less drift.
+        strength = max(0.5, 0.3 * math.log(1.0 + access_count) + 0.4 * importance)
+        forget_rate = 1.0 / strength  # λ(m)
+        # F(ξ) = ξ/||ξ|| points outward (toward boundary = archived zone)
+        xi_norm = float(np.linalg.norm(xi))
+        if xi_norm > _EPS:
+            forget_direction = xi / xi_norm
+        else:
+            forget_direction = np.zeros(self.dim)
+        forgetting_drift = forget_rate * forget_direction * self.dt * 0.1  # Scaled down to prevent instability
+
         # --- Curvature correction: 0.5 * T * (d-2) * lambda^{-1} * xi * dt (Eq. 5 term 3) ---
         correction = 0.5 * self.temperature * (self.dim - 2) * lam_inv * xi * self.dt
 
@@ -186,8 +199,8 @@ class LangevinDynamics:
         noise = rng.standard_normal(self.dim)
         diffusion = math.sqrt(2.0 * self.temperature * self.dt) * lam_inv * noise
 
-        # --- Full Euler-Maruyama update (Girolami & Calderhead 2011) ---
-        new_xi = xi + drift + correction + diffusion
+        # --- Full Euler-Maruyama update with forgetting (Eq. 6, Girolami & Calderhead 2011) ---
+        new_xi = xi + drift + forgetting_drift + correction + diffusion
 
         # --- Project back into the open ball ---
         new_xi = _project_to_ball(new_xi)

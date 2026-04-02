@@ -4,7 +4,7 @@
 
 """SuperLocalMemory V3 — Weighted Reciprocal Rank Fusion.
 
-Single-pass RRF with k=60 for diverse retrieval (D116).
+Single-pass RRF with k=15 for sharp rank discrimination on small candidate pools.
 V1 had triple re-fusion which destroyed rankings — fixed in V2.
 
 Part of Qualixar | Author: Varun Pratap Bhardwaj
@@ -27,7 +27,7 @@ class FusionResult:
 def weighted_rrf(
     channels: dict[str, list[tuple[str, float]]],
     weights: dict[str, float],
-    k: int = 60,
+    k: int = 15,
     max_rank_penalty: int = 1000,
 ) -> list[FusionResult]:
     """Fuse ranked lists via Weighted Reciprocal Rank Fusion.

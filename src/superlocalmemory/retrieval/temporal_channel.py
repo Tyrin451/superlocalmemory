@@ -124,6 +124,16 @@ class TemporalChannel:
         import re
         _PROPER_RE = re.compile(r"\b([A-Z][a-z]+)\b")
         names = [m.group(1) for m in _PROPER_RE.finditer(query)]
+        # Also try title-cased version for lowercase queries
+        if not names:
+            names = [m.group(1) for m in _PROPER_RE.finditer(query.title())]
+        # Filter out common words from title-casing
+        _stop = {"What", "When", "Where", "Who", "Which", "How", "Does", "Did",
+                 "The", "That", "This", "There", "Then", "Have", "Has", "Had",
+                 "About", "After", "Before", "From", "With", "Would", "Could",
+                 "Should", "Will", "Because", "Also", "Just", "Like", "Know",
+                 "Think", "Tell", "Said"}
+        names = [n for n in names if n not in _stop]
         if not names:
             return []
 
@@ -146,7 +156,10 @@ class TemporalChannel:
                 fid = dict(row)["fact_id"]
                 if fid not in seen:
                     seen.add(fid)
-                    results.append((fid, 0.85))  # High base score for entity-temporal
+                    # Rank by position (first events more likely relevant) instead
+                    # of flat 0.85 which loses discrimination
+                    rank_score = 0.85 - len(seen) * 0.02
+                    results.append((fid, max(0.3, rank_score)))
 
         return results
 

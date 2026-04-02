@@ -139,6 +139,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
                     "results": result.get("results", []),
                     "count": result.get("result_count", 0),
                     "query_type": result.get("query_type", "unknown"),
+                    "channel_weights": result.get("channel_weights", {}),
+                    "retrieval_time_ms": result.get("retrieval_time_ms", 0),
                 }
             return {"success": False, "error": result.get("error", "Recall failed")}
         except Exception as exc:
@@ -280,11 +282,15 @@ def register_core_tools(server, get_engine: Callable) -> None:
             engine.profile_id = profile_id
 
             # Persist to both config stores so CLI and Dashboard stay in sync
-            from superlocalmemory.server.routes.helpers import (
-                ensure_profile_in_db, set_active_profile_everywhere,
-            )
-            ensure_profile_in_db(profile_id)
-            set_active_profile_everywhere(profile_id)
+            try:
+                from superlocalmemory.server.routes.helpers import (
+                    ensure_profile_in_db, set_active_profile_everywhere,
+                )
+                ensure_profile_in_db(profile_id)
+                set_active_profile_everywhere(profile_id)
+            except ImportError:
+                # Dashboard not installed — profile switch still works for MCP/CLI
+                logger.debug("Dashboard routes not available, profile set in engine only")
 
             return {
                 "success": True,
@@ -337,8 +343,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Get learned behavioral patterns (interests, refinements, archival habits)."""
         try:
             engine = get_engine()
-            from superlocalmemory.learning.behavioral import BehavioralStore
-            store = BehavioralStore(engine._db.db_path)
+            from superlocalmemory.learning.behavioral import BehavioralPatternStore
+            store = BehavioralPatternStore(engine._db.db_path)
             ptype = pattern_type if pattern_type else None
             patterns = store.get_patterns(
                 engine.profile_id, pattern_type=ptype, limit=limit,
@@ -353,8 +359,8 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """Correct or annotate a learned behavioral pattern to improve retrieval."""
         try:
             engine = get_engine()
-            from superlocalmemory.learning.behavioral import BehavioralStore
-            store = BehavioralStore(engine._db.db_path)
+            from superlocalmemory.learning.behavioral import BehavioralPatternStore
+            store = BehavioralPatternStore(engine._db.db_path)
             store.record(
                 engine.profile_id,
                 pattern_type="correction",

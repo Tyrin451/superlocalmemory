@@ -142,17 +142,25 @@ class GraphBuilder:
 
     # -- Edge builders (private) -------------------------------------------
 
+    # V3.3.12: Cap entity edges per entity to prevent O(n²) explosion.
+    # With 500+ facts sharing a popular entity, creating an edge to each
+    # produced 44K+ edges and 22-min ingestion. Cap to 20 most recent per entity.
+    _MAX_ENTITY_EDGES_PER_ENTITY: int = 20
+
     def _build_entity_edges(
         self, new_fact: AtomicFact, profile_id: str,
     ) -> list[GraphEdge]:
-        """ENTITY edges: shared canonical entity — NO 50-memory limit."""
+        """ENTITY edges: shared canonical entity — capped to most recent per entity."""
         if not new_fact.canonical_entities:
             return []
         edges: list[GraphEdge] = []
         seen: set[str] = set()
 
         for entity_id in new_fact.canonical_entities:
+            entity_edge_count = 0
             for other in self._db.get_facts_by_entity(entity_id, profile_id):
+                if entity_edge_count >= self._MAX_ENTITY_EDGES_PER_ENTITY:
+                    break
                 if other.fact_id == new_fact.fact_id or other.fact_id in seen:
                     continue
                 if self._edge_exists(new_fact.fact_id, other.fact_id, EdgeType.ENTITY, profile_id):
@@ -163,6 +171,7 @@ class GraphBuilder:
                     target_id=other.fact_id, edge_type=EdgeType.ENTITY,
                     weight=_ENTITY_WEIGHT,
                 ))
+                entity_edge_count += 1
         return edges
 
     def _build_temporal_edges(
@@ -184,7 +193,10 @@ class GraphBuilder:
         seen_pairs: set[tuple[str, str]] = set()
 
         for entity_id in new_fact.canonical_entities:
+            temporal_edge_count = 0
             for other in self._db.get_facts_by_entity(entity_id, profile_id):
+                if temporal_edge_count >= self._MAX_ENTITY_EDGES_PER_ENTITY:
+                    break  # V3.3.12: cap temporal edges like entity edges
                 if other.fact_id == new_fact.fact_id:
                     continue
                 other_dt = _parse_date(other.observation_date)
@@ -212,6 +224,7 @@ class GraphBuilder:
                     target_id=other.fact_id, edge_type=EdgeType.TEMPORAL,
                     weight=weight,
                 ))
+                temporal_edge_count += 1
                 # Reverse: other -> new
                 if not self._edge_exists(other.fact_id, new_fact.fact_id, EdgeType.TEMPORAL, profile_id):
                     edges.append(GraphEdge(

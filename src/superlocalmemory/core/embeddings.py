@@ -50,7 +50,9 @@ class DimensionMismatchError(RuntimeError):
 
 
 _IDLE_TIMEOUT_SECONDS = 120  # 2 minutes — kill worker after idle
-_SUBPROCESS_RESPONSE_TIMEOUT = 120  # V3.3.2: 120s for ONNX cold start
+# V3.3.12: Configurable via SLM_EMBED_IDLE_TIMEOUT env var (seconds)
+_IDLE_TIMEOUT_SECONDS = int(os.environ.get("SLM_EMBED_IDLE_TIMEOUT", _IDLE_TIMEOUT_SECONDS))
+_SUBPROCESS_RESPONSE_TIMEOUT = 180  # V3.3.12: 180s (was 120s) — respawns on stressed systems need more time
 _WORKER_RECYCLE_AFTER = 1000  # Recycle worker after N requests (C++ fragmentation prevention)
 
 

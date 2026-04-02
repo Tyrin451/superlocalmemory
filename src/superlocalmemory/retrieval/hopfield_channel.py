@@ -288,8 +288,8 @@ class HopfieldChannel:
         ):
             return (self._cached_matrix, self._cached_fact_ids)
 
-        # Step 2: Load all facts
-        facts = self._db.get_all_facts(profile_id)
+        # Step 2: Load facts (V3.3.12: cap to most recent 5000 to bound memory)
+        facts = self._db.get_all_facts(profile_id)[:5000]
         if not facts:
             return (None, [])
 

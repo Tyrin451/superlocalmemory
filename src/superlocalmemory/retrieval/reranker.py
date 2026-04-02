@@ -35,7 +35,9 @@ _live_rerankers: set[weakref.ref] = set()
 logger = logging.getLogger(__name__)
 
 _IDLE_TIMEOUT_SECONDS = 120  # 2 min → kill worker
-_SUBPROCESS_RESPONSE_TIMEOUT = 120  # 120s for ONNX cold start
+# V3.3.12: Configurable via SLM_RERANKER_IDLE_TIMEOUT env var
+_IDLE_TIMEOUT_SECONDS = int(os.environ.get("SLM_RERANKER_IDLE_TIMEOUT", _IDLE_TIMEOUT_SECONDS))
+_SUBPROCESS_RESPONSE_TIMEOUT = 180  # V3.3.12: 180s (was 120s) for stressed system respawns
 _WORKER_RECYCLE_AFTER = 500  # Recycle after N requests
 
 
@@ -129,8 +131,23 @@ class CrossEncoderReranker:
             finally:
                 self._worker_loading = False
 
-        t = threading.Thread(target=_warmup, daemon=True, name="ce-warmup")
-        t.start()
+        self._warmup_thread = threading.Thread(target=_warmup, daemon=True, name="ce-warmup")
+        self._warmup_thread.start()
+
+    def warmup_sync(self, timeout: float = 120.0) -> bool:
+        """Block until reranker model is loaded. Returns True if ready.
+
+        V3.3.12: Critical for benchmarks and first-recall quality.
+        Without this, first 30-60s of recalls get no reranking (-30.7pp).
+        """
+        if self._model_loaded:
+            return True
+        if not self._worker_loading and not self._model_loaded:
+            self._start_background_warmup()
+        t = getattr(self, '_warmup_thread', None)
+        if t is not None:
+            t.join(timeout=timeout)
+        return self._model_loaded
 
     # ------------------------------------------------------------------
     # Worker management (mirrors EmbeddingService pattern)
@@ -304,13 +321,13 @@ class CrossEncoderReranker:
 
         documents = [fact.content for fact, _ in candidates]
 
-        # Short timeout (10s) — model should already be loaded by warmup.
-        # If worker crashed or is still loading, fallback immediately.
+        # V3.3.12: Increased timeout 10s→60s — L-12-v2 needs PyTorch + ONNX load.
+        # Critical: Paper 2 ablation showed -30.7pp without reranking.
         resp = self._send_request({
             "cmd": "rerank",
             "query": query,
             "documents": documents,
-        }, timeout=10.0)
+        }, timeout=60.0)
 
         if resp is None or not resp.get("ok"):
             # Fallback: return by existing score

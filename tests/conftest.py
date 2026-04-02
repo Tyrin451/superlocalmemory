@@ -69,6 +69,29 @@ def cleanup_slm_workers_at_end():
     _kill_orphaned_slm_workers()
 
 
+@pytest.fixture(autouse=True)
+def cleanup_slm_workers_between_tests():
+    """Kill SLM subprocess workers after EACH test to prevent memory pileup.
+
+    V3.3.12: Without this, each test that creates a MemoryEngine spawns
+    embedding_worker (~930 MB) + reranker_worker (~500 MB). Workers from
+    test N don't auto-kill before test N+1 spawns new ones, causing 7+ GB
+    memory pileup. This fixture ensures workers are cleaned between tests.
+    """
+    yield
+    # Clean up any embedding/reranker services created during this test
+    try:
+        from superlocalmemory.core.embeddings import _cleanup_all_embedding_services
+        _cleanup_all_embedding_services()
+    except Exception:
+        pass
+    try:
+        from superlocalmemory.retrieval.reranker import _cleanup_all_rerankers
+        _cleanup_all_rerankers()
+    except Exception:
+        pass
+
+
 @pytest.fixture
 def in_memory_db():
     """Create an in-memory SQLite database with full SLM schema.

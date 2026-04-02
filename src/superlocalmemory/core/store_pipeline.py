@@ -170,13 +170,23 @@ def run_store(
     # V3.3.11: Also store raw content as a verbatim fact to preserve details
     # that fact extraction may abstract away (dates, names, specifics).
     # This ensures BM25 and semantic search can always find the original text.
+    # V3.3.12: Extract entities from verbatim content so entity channel + temporal
+    # channel can find it (was entities=[] which made 4/6 channels blind).
     if content.strip() and len(content.strip()) >= 20:
         import uuid
+        import re as _re
+        _verbatim_text = content.strip()
+        # Extract entities using the same regex as fact_extractor
+        _ent_re = _re.compile(r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,3})\b")
+        _entity_set = {m.group(1) for m in _ent_re.finditer(_verbatim_text)}
+        # Also extract all-caps abbreviations (NYU, MIT, etc.) — dedup with first set
+        _entity_set |= {m.group(1) for m in _re.finditer(r'\b([A-Z]{2,})\b', _verbatim_text)}
+        _verbatim_entities = sorted(_entity_set)
         verbatim = AtomicFact(
             fact_id=uuid.uuid4().hex[:16],
-            content=content.strip(),
+            content=_verbatim_text,
             fact_type=FactType.EPISODIC,
-            entities=[],
+            entities=_verbatim_entities,
             session_id=session_id,
             observation_date=parsed_date,
             confidence=0.9,

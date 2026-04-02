@@ -192,6 +192,30 @@ def run_recall(
         except Exception as exc:
             logger.debug("Access log batch store failed: %s", exc)
 
+    # V3.3.12: Wire BehavioralTracker.record_query() into live recall pipeline
+    try:
+        from superlocalmemory.learning.behavioral import BehavioralTracker
+        _tracker = BehavioralTracker(db)
+        _tracker.record_query(
+            profile_id=profile_id, query=query,
+            query_type=response.query_type,
+            result_count=len(response.results),
+        )
+    except Exception as exc:
+        logger.debug("Behavioral tracking: %s", exc)
+
+    # V3.3.12: Spaced repetition update on recall (Ebbinghaus on_access_event)
+    if response.results:
+        try:
+            from superlocalmemory.learning.forgetting_scheduler import ForgettingScheduler
+            from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+            _ebbinghaus = EbbinghausCurve(config.forgetting)
+            _fsched = ForgettingScheduler(db, _ebbinghaus, config.forgetting)
+            for r in response.results[:10]:
+                _fsched.on_access_event(r.fact.fact_id, profile_id)
+        except Exception as exc:
+            logger.debug("Spaced repetition update: %s", exc)
+
     # Phase 3: Hebbian strengthening for co-accessed facts
     if auto_linker and response.results:
         try:

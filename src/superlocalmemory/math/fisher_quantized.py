@@ -145,10 +145,14 @@ class FRQADMetric:
         if bit_width >= 32:
             return np.array(base_variance, dtype=np.float64)
 
-        scale = (32.0 / bit_width) ** self._config.kappa
-        sigma_q = np.asarray(base_variance, dtype=np.float64) * scale
+        # V3.3.12: Paper-correct ADDITIVE variance combination (was multiplicative).
+        # sigma²_total = sigma²_obs + sigma²_quant
+        # sigma²_quant = Delta²/12 where Delta = 2/2^b (uniform quantization step)
+        delta = 2.0 / (2 ** bit_width)  # Quantization step size
+        sigma_q_sq = (delta ** 2) / 12.0  # Uniform quantization noise variance
+        sigma_total = np.asarray(base_variance, dtype=np.float64) + sigma_q_sq
 
-        return np.clip(sigma_q, self._config.variance_floor, self._config.variance_ceiling)
+        return np.clip(sigma_total, self._config.variance_floor, self._config.variance_ceiling)
 
     # ------------------------------------------------------------------
     # Core distance (THE novel contribution)

@@ -75,6 +75,8 @@ class RetrievalEngine:
         self._temporal: TemporalChannel | None = channels.get("temporal")
         # Phase G: Hopfield channel (6th)
         self._hopfield: HopfieldChannel | None = channels.get("hopfield")
+        # Phase 3: Spreading Activation channel
+        self._spreading_activation = channels.get("spreading_activation")
         self._embedder = embedder
         self._reranker = reranker
         self._strategy = strategy or QueryStrategyClassifier()
@@ -101,6 +103,11 @@ class RetrievalEngine:
         # Phase G: Hopfield channel (6th) — needs embedding input
         if self._hopfield is not None:
             self._registry.register_channel("hopfield", self._hopfield, needs_embedding=True)
+        # Phase 3: Spreading Activation (5th channel) — needs embedding input
+        if self._spreading_activation is not None:
+            self._registry.register_channel(
+                "spreading_activation", self._spreading_activation, needs_embedding=True,
+            )
 
     def recall(
         self, query: str, profile_id: str,
@@ -139,7 +146,7 @@ class RetrievalEngine:
         fused = weighted_rrf(ch_results, strat.weights, k=self._config.rrf_k)
 
         # Bridge discovery for multi-hop queries
-        if self._bridge is not None and strat.query_type == "multi_hop":
+        if self._bridge is not None and strat.query_type in ("multi_hop", "entity", "factual", "general"):
             try:
                 seed_ids = [fr.fact_id for fr in fused[:10]]
                 bridges = self._bridge.discover(seed_ids, profile_id, max_bridges=10)
@@ -221,6 +228,7 @@ class RetrievalEngine:
         needs_embedding = (
             (self._semantic is not None and "semantic" not in disabled)
             or (self._hopfield is not None and "hopfield" not in disabled)
+            or (self._spreading_activation is not None and "spreading_activation" not in disabled)
         )
         if needs_embedding:
             try:
@@ -268,6 +276,23 @@ class RetrievalEngine:
                     out["hopfield"] = r
             except Exception as exc:
                 logger.warning("Hopfield channel: %s", exc)
+
+        # Phase 3: Spreading Activation channel (5th) — graph-based associative recall
+        if self._spreading_activation is not None and q_emb is not None and "spreading_activation" not in disabled:
+            try:
+                r = self._spreading_activation.search(q_emb, profile_id, self._config.bm25_top_k)
+                if r:
+                    out["spreading_activation"] = r
+            except Exception as exc:
+                logger.warning("Spreading activation channel: %s", exc)
+
+        # Apply registered post-retrieval filters (forgetting filter, etc.)
+        if hasattr(self, '_registry') and self._registry._filters:
+            for fn in self._registry._filters:
+                try:
+                    out = fn(out, profile_id, None)
+                except Exception as exc:
+                    logger.warning("Post-retrieval filter failed: %s", exc)
 
         return out
 
@@ -336,12 +361,24 @@ class RetrievalEngine:
 
         score_map = {fact.fact_id: score for fact, score in scored}
 
+        # Min-max normalize CE scores to [0, 1] within the batch instead of
+        # sigmoid (which compresses the useful discrimination range).
+        ce_values = list(score_map.values())
+        ce_min = min(ce_values) if ce_values else 0.0
+        ce_max = max(ce_values) if ce_values else 1.0
+        ce_range = ce_max - ce_min if ce_max > ce_min else 1.0
+
+        # Also normalize RRF scores so both terms contribute meaningfully
+        rrf_values = [fr.fused_score for fr in fused]
+        rrf_max = max(rrf_values) if rrf_values else 1.0
+        rrf_max = rrf_max if rrf_max > 0 else 1.0
+
         updated = [
             FusionResult(
                 fact_id=fr.fact_id,
                 fused_score=(
-                    alpha * self._sigmoid(score_map.get(fr.fact_id, 0.0))
-                    + (1.0 - alpha) * fr.fused_score
+                    alpha * ((score_map.get(fr.fact_id, ce_min) - ce_min) / ce_range)
+                    + (1.0 - alpha) * (fr.fused_score / rrf_max)
                 ),
                 channel_ranks=fr.channel_ranks,
                 channel_scores=fr.channel_scores,
@@ -425,12 +462,10 @@ class RetrievalEngine:
             # due to BM25 name-matching (greetings like "Hey Caroline!" score high
             # on BM25 but have zero retrieval value)
             content_len = len(fact.content.strip())
-            if content_len < 25:
-                quality = 0.1
-            elif content_len < 50:
-                quality = 0.5
-            elif content_len < 80:
-                quality = 0.8
+            if content_len < 10:
+                quality = 0.3
+            elif content_len < 25:
+                quality = 0.7
             else:
                 quality = 1.0
 

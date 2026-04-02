@@ -92,11 +92,10 @@ class TestLLMConfig:
 class TestChannelWeights:
     def test_defaults(self) -> None:
         cw = ChannelWeights()
-        assert cw.semantic == 1.2
+        assert cw.semantic == 1.5
         assert cw.bm25 == 1.0
-        # S24: entity_graph raised from 1.0 to 1.3 — entity-linked facts
-        # are high-precision matches that should rank above pure BM25
-        assert cw.entity_graph == 1.3
+        # V3.3.12: rebalanced for conversational retrieval — semantic dominates
+        assert cw.entity_graph == 1.0
         # S24: temporal raised from 0.8 to 1.0 — temporal_events now
         # populated (F2 fix), temporal channel contributes real results
         assert cw.temporal == 1.0
@@ -122,7 +121,7 @@ class TestSubConfigs:
 
     def test_retrieval_defaults(self) -> None:
         rc = RetrievalConfig()
-        assert rc.rrf_k == 60
+        assert rc.rrf_k == 15
         assert rc.top_k == 20
         assert rc.use_cross_encoder is True
         assert rc.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -272,6 +271,7 @@ class TestV332OnnxCrossEncoderConfig:
         assert loaded.retrieval.use_cross_encoder is False
         # Backend field still added so migration won't trigger again
         assert loaded.retrieval.cross_encoder_backend == "onnx"
+        # Migration preserves old default for backward compat (new installs get BGE)
         assert loaded.retrieval.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     def test_load_auto_enables_ce_when_absent(self, tmp_path: Path) -> None:

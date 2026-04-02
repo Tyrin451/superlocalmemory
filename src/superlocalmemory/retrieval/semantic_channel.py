@@ -182,7 +182,7 @@ class SemanticChannel:
             else:
                 sim = cos_sim
 
-            if sim > 0.3:
+            if sim > 0.05:
                 scored.append((fact.fact_id, sim))
 
         scored.sort(key=lambda x: x[1], reverse=True)
@@ -235,7 +235,7 @@ class SemanticChannel:
             else:
                 sim = cos_sim
 
-            if sim > 0.3:
+            if sim > 0.05:
                 scored.append((fact.fact_id, sim))
 
         scored.sort(key=lambda x: x[1], reverse=True)

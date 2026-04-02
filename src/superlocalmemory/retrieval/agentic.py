@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_ROUNDS = 2
 _SUFFICIENCY_SCORE_THRESHOLD = 0.6
-_SKIP_TYPES = frozenset()  # Hotpatch: enable agentic for ALL query types including multi_hop
+_SKIP_TYPES = frozenset({"temporal"})  # S15: agentic harms temporal queries
 
 _SUFFICIENCY_SYSTEM = (
     "You evaluate whether retrieved context is sufficient to answer a query. "

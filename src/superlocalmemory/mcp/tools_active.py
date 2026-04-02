@@ -27,7 +27,7 @@ DB_PATH = MEMORY_DIR / "memory.db"
 
 
 def _emit_event(event_type: str, payload: dict | None = None,
-                source_agent: str = "mcp_client") -> None:
+                source_agent: str = "mcp_client") -> None:  # V3.3.12: see also mcp/shared.py
     """Emit an event to the EventBus (best-effort, never raises)."""
     try:
         from superlocalmemory.infra.event_bus import EventBus
@@ -252,4 +252,34 @@ def register_active_tools(server, get_engine: Callable) -> None:
             }
         except Exception as exc:
             logger.exception("report_feedback failed")
+            return {"success": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # close_session — V3.3.12: Expose session closure via MCP
+    # ------------------------------------------------------------------
+
+    @server.tool()
+    async def close_session(session_id: str = "") -> dict:
+        """Close the current session and create temporal summary events.
+
+        Aggregates facts from the session into per-entity temporal summaries,
+        enabling temporal queries like "What happened in session X?"
+
+        Args:
+            session_id: Session to close. Defaults to the most recent session.
+        """
+        try:
+            engine = get_engine()
+            pid = engine.profile_id
+            sid = session_id or getattr(engine, '_last_session_id', '')
+            if not sid:
+                return {"success": False, "error": "No session_id provided"}
+            count = engine.close_session(sid)
+            return {
+                "success": True,
+                "session_id": sid,
+                "summary_events_created": count,
+            }
+        except Exception as exc:
+            logger.exception("close_session failed")
             return {"success": False, "error": str(exc)}

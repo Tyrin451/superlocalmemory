@@ -67,6 +67,12 @@ def extract_query_entities(query: str) -> list[str]:
         _add(m.group(0))
     for m in re.finditer(r'"([^"]+)"', query):
         _add(m.group(1).strip())
+    # Also extract multi-word capitalized sequences (e.g. "New York", "San Francisco")
+    for m in re.finditer(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', query):
+        _add(m.group(1))
+    # Extract all-caps abbreviations (e.g. NYU, MIT, UCLA) — min 2 chars
+    for m in re.finditer(r'\b([A-Z]{2,})\b', query):
+        _add(m.group(1))
 
     return candidates
 

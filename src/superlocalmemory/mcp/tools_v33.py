@@ -27,7 +27,7 @@ DB_PATH = MEMORY_DIR / "memory.db"
 
 
 def _emit_event(event_type: str, payload: dict | None = None,
-                source_agent: str = "mcp_client") -> None:
+                source_agent: str = "mcp_client") -> None:  # V3.3.12: see also mcp/shared.py
     """Emit an event to the EventBus (best-effort, never raises)."""
     try:
         from superlocalmemory.infra.event_bus import EventBus
@@ -76,8 +76,15 @@ def register_v33_tools(server, get_engine: Callable) -> None:
             )
 
             if dry_run:
-                # Force run (bypass interval) but don't commit
-                result = scheduler.run_decay_cycle(pid, force=True)
+                # Dry run: compute retention stats without applying changes
+                from superlocalmemory.math.ebbinghaus import EbbinghausCurve as _EC
+                facts = engine._db.get_all_facts(pid)
+                zones = {"active": 0, "warm": 0, "cold": 0, "archive": 0, "forgotten": 0}
+                for f in facts:
+                    r = ebbinghaus.compute_retention(f.access_count or 0, f.importance or 0.5, 0, 0.0)
+                    zone = ebbinghaus.classify_zone(r)
+                    zones[zone] = zones.get(zone, 0) + 1
+                result = {"total": len(facts), "transitions": 0, "dry_run_zones": zones}
             else:
                 result = scheduler.run_decay_cycle(pid, force=True)
 
@@ -137,8 +144,9 @@ def register_v33_tools(server, get_engine: Callable) -> None:
             )
 
             if dry_run:
-                # Preview: count what would change without committing
-                result = scheduler.run_eap_cycle(pid)
+                # Dry run: report current quantization state without changes
+                facts = engine._db.get_all_facts(pid)
+                result = {"total": len(facts), "would_quantize": 0, "dry_run": True}
             else:
                 result = scheduler.run_eap_cycle(pid)
 
@@ -185,13 +193,13 @@ def register_v33_tools(server, get_engine: Callable) -> None:
 
             _emit_event("ccq.consolidation_complete", {
                 "profile_id": pid,
-                "clusters_found": result.clusters_found,
+                "clusters_processed": result.clusters_processed,
                 "blocks_created": result.blocks_created,
             })
 
             return {
                 "success": True,
-                "clusters_found": result.clusters_found,
+                "clusters_processed": result.clusters_processed,
                 "blocks_created": result.blocks_created,
                 "facts_archived": result.facts_archived,
                 "compression_ratio": round(result.compression_ratio, 3),
@@ -348,4 +356,57 @@ def register_v33_tools(server, get_engine: Callable) -> None:
 
         except Exception as exc:
             logger.exception("get_retention_stats tool failed")
+            return {"success": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # 7. run_maintenance — V3.3.12: Combined periodic maintenance cycle
+    # ------------------------------------------------------------------
+    @server.tool()
+    async def run_maintenance(profile_id: str = "") -> dict:
+        """Run all periodic maintenance tasks in a single call.
+
+        Combines Langevin dynamics stepping, Ebbinghaus forgetting decay,
+        and behavioral pattern mining into one convenient maintenance cycle.
+        Clients should call this periodically (e.g., at session end).
+
+        Args:
+            profile_id: Profile to maintain (default: active profile).
+        """
+        try:
+            engine = get_engine()
+            pid = profile_id or engine.profile_id
+            results = {}
+
+            # 1. Langevin dynamics step (lifecycle evolution)
+            try:
+                from superlocalmemory.core.maintenance import run_maintenance as _run_maint
+                maint_result = _run_maint(engine._db, engine._config, pid)
+                results["langevin"] = {"updated": maint_result.get("updated", 0)}
+            except Exception as exc:
+                results["langevin"] = {"error": str(exc)}
+
+            # 2. Ebbinghaus forgetting decay
+            try:
+                from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+                from superlocalmemory.learning.forgetting_scheduler import ForgettingScheduler
+                ebbinghaus = EbbinghausCurve(engine._config.forgetting)
+                scheduler = ForgettingScheduler(engine._db, ebbinghaus, engine._config.forgetting)
+                decay_result = scheduler.run_decay_cycle(pid, force=False)
+                results["forgetting"] = decay_result
+            except Exception as exc:
+                results["forgetting"] = {"error": str(exc)}
+
+            # 3. Behavioral pattern mining
+            try:
+                from superlocalmemory.learning.consolidation_worker import ConsolidationWorker
+                cw = ConsolidationWorker(engine._db, engine._config)
+                patterns = cw._generate_patterns(pid)
+                results["behavioral"] = {"patterns_mined": len(patterns)}
+            except Exception as exc:
+                results["behavioral"] = {"error": str(exc)}
+
+            return {"success": True, "profile": pid, **results}
+
+        except Exception as exc:
+            logger.exception("run_maintenance failed")
             return {"success": False, "error": str(exc)}

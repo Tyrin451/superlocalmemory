@@ -68,6 +68,7 @@ class BM25Channel:
         self._corpus: list[list[str]] = []
         self._fact_ids: list[str] = []
         self._fact_id_set: set[str] = set()
+        self._raw_texts: list[str] = []  # V3.3.12: raw content for phrase matching
         self._bm25: BM25Plus | None = None
         self._dirty: bool = False
         self._loaded_profiles: set[str] = set()
@@ -96,15 +97,24 @@ class BM25Channel:
                     self._corpus.append(tokens)
                     self._fact_ids.append(fact.fact_id)
                     self._fact_id_set.add(fact.fact_id)
+                    self._raw_texts.append(fact.content)
                     # Persist for next cold start
                     self._db.store_bm25_tokens(fact.fact_id, profile_id, tokens)
         else:
+            # Load raw texts for phrase matching (V3.3.12)
+            fact_content_map = {}
+            try:
+                facts = self._db.get_all_facts(profile_id)
+                fact_content_map = {f.fact_id: f.content for f in facts}
+            except Exception:
+                pass
             for fid, tokens in token_map.items():
                 if fid in self._fact_id_set:
                     continue
                 self._corpus.append(tokens)
                 self._fact_ids.append(fid)
                 self._fact_id_set.add(fid)
+                self._raw_texts.append(fact_content_map.get(fid, ""))
 
         self._dirty = True
         self._loaded_profiles.add(profile_id)
@@ -128,6 +138,9 @@ class BM25Channel:
         self._corpus.append(tokens)
         self._fact_ids.append(fact_id)
         self._fact_id_set.add(fact_id)
+        if not hasattr(self, '_raw_texts'):
+            self._raw_texts = []
+        self._raw_texts.append(content)
         self._dirty = True
 
         # Persist for cold start
@@ -168,9 +181,16 @@ class BM25Channel:
         scores = self._bm25.get_scores(query_tokens)
 
         scored: list[tuple[str, float]] = []
+        # V3.3.12: Exact phrase bonus — boost facts containing the full query phrase
+        query_lower = query.lower().strip()
         for i, score in enumerate(scores):
             if score > 0.0:
-                scored.append((self._fact_ids[i], float(score)))
+                bonus = score
+                # Exact phrase match bonus: if the query appears as a substring in the document
+                if len(query_lower) >= 5 and i < len(self._raw_texts):
+                    if query_lower in self._raw_texts[i].lower():
+                        bonus *= 1.5  # 50% boost for exact phrase match
+                scored.append((self._fact_ids[i], bonus))
 
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]

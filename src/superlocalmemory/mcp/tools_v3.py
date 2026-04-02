@@ -228,6 +228,7 @@ def register_v3_tools(server, get_engine: Callable) -> None:
 
             facts = engine._db.get_all_facts(pid)[:limit]
             all_contradictions: list[dict] = []
+            errors_count = 0
             for fact in facts:
                 if not fact.embedding or not fact.canonical_entities:
                     continue
@@ -243,11 +244,13 @@ def register_v3_tools(server, get_engine: Callable) -> None:
                             "content_a": fact.content[:80],
                         })
                 except Exception:
+                    errors_count += 1
                     continue
 
             return {
                 "success": True,
                 "facts_checked": len(facts),
+                "facts_errored": errors_count,
                 "contradictions": all_contradictions[:50],
                 "total_contradictions": len(all_contradictions),
             }

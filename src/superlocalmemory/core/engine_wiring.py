@@ -339,7 +339,7 @@ def _init_spreading_activation(
             SpreadingActivation,
             SpreadingActivationConfig,
         )
-        sa_config = SpreadingActivationConfig(enabled=False)
+        sa_config = SpreadingActivationConfig(enabled=True)
         return SpreadingActivation(
             db=db, vector_store=vector_store, config=sa_config,
         )

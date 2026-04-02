@@ -197,8 +197,8 @@ def register_resources(server, get_engine: Callable) -> None:
 
             # Behavioral patterns summary
             try:
-                from superlocalmemory.learning.behavioral import BehavioralStore
-                store = BehavioralStore(engine._db.db_path)
+                from superlocalmemory.learning.behavioral import BehavioralPatternStore
+                store = BehavioralPatternStore(engine._db.db_path)
                 summary = store.get_summary(pid)
             except Exception:
                 summary = {}
