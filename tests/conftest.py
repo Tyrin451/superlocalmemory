@@ -35,7 +35,13 @@ def _kill_orphaned_slm_workers() -> None:
     Targets: reranker_worker, embedding_worker, recall_worker.
     These subprocesses each consume 0.5-1.5 GB and can orphan when
     tests crash, get interrupted, or when parallel agents run tests.
+
+    Skipped on Windows where pkill is unavailable and signal handling
+    differs (KeyboardInterrupt propagation causes false CI failures).
     """
+    if os.name == "nt":
+        return  # Windows: atexit + __del__ handlers are sufficient
+
     worker_patterns = [
         "superlocalmemory.core.reranker_worker",
         "superlocalmemory.core.embedding_worker",
