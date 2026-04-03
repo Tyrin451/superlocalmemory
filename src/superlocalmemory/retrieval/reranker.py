@@ -94,8 +94,10 @@ class CrossEncoderReranker:
     def _start_background_warmup(self) -> None:
         """Start worker and load model in background thread.
 
-        Returns immediately. The worker loads the model in parallel
-        with the rest of engine initialization and the first recall.
+        V3.3.16: Uses _send_request (lock-protected) instead of raw
+        stdin/stdout access. Previous code wrote to stdin without the
+        lock, creating a race where the warmup's readline thread could
+        steal responses meant for _send_request → deadlock → timeout.
         """
         if self._worker_loading or self._model_loaded:
             return
@@ -106,26 +108,18 @@ class CrossEncoderReranker:
                 self._ensure_worker()
                 if self._worker_proc is None:
                     return
-                # Send load command and wait for response
-                req = json.dumps({
+                resp = self._send_request({
                     "cmd": "load",
                     "model_name": self._model_name,
                     "backend": self._backend,
-                }) + "\n"
-                self._worker_proc.stdin.write(req)
-                self._worker_proc.stdin.flush()
-                resp_line = self._readline_with_timeout(
-                    self._worker_proc.stdout, _SUBPROCESS_RESPONSE_TIMEOUT,
-                )
-                if resp_line:
-                    resp = json.loads(resp_line)
-                    if resp.get("ok"):
-                        self._model_loaded = True
-                        logger.info(
-                            "Reranker worker warm (backend=%s)",
-                            resp.get("backend", "?"),
-                        )
-                        self._reset_idle_timer()
+                }, timeout=_SUBPROCESS_RESPONSE_TIMEOUT)
+                if resp and resp.get("ok"):
+                    self._model_loaded = True
+                    logger.info(
+                        "Reranker worker warm (backend=%s, warmup_inference=%s)",
+                        resp.get("backend", "?"),
+                        resp.get("warmup_inference", False),
+                    )
             except Exception as exc:
                 logger.debug("Background reranker warmup failed: %s", exc)
             finally:
