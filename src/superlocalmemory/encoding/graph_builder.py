@@ -261,6 +261,9 @@ class GraphBuilder:
                 break
         return edges
 
+    # V3.3.13: Cap causal edges per entity to prevent O(n²) explosion (same as entity/temporal).
+    _MAX_CAUSAL_EDGES_PER_ENTITY: int = 20
+
     def _build_causal_edges(
         self, new_fact: AtomicFact, profile_id: str,
     ) -> list[GraphEdge]:
@@ -273,7 +276,10 @@ class GraphBuilder:
         edges: list[GraphEdge] = []
         seen: set[str] = set()
         for entity_id in new_fact.canonical_entities:
+            causal_edge_count = 0
             for other in self._db.get_facts_by_entity(entity_id, profile_id):
+                if causal_edge_count >= self._MAX_CAUSAL_EDGES_PER_ENTITY:
+                    break
                 if other.fact_id == new_fact.fact_id or other.fact_id in seen:
                     continue
                 if self._edge_exists(other.fact_id, new_fact.fact_id, EdgeType.CAUSAL, profile_id):
@@ -284,6 +290,7 @@ class GraphBuilder:
                     target_id=new_fact.fact_id, edge_type=EdgeType.CAUSAL,
                     weight=_CAUSAL_WEIGHT,
                 ))
+                causal_edge_count += 1
         return edges
 
     # -- Helpers -----------------------------------------------------------

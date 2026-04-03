@@ -124,7 +124,7 @@ class TestSubConfigs:
         assert rc.rrf_k == 15
         assert rc.top_k == 20
         assert rc.use_cross_encoder is True
-        assert rc.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        assert rc.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-12-v2"
         assert rc.cross_encoder_backend == "onnx"
         assert rc.agentic_max_rounds == 3
 
@@ -223,7 +223,7 @@ class TestV332OnnxCrossEncoderConfig:
         cfg = SLMConfig.for_mode(Mode.A)
         assert cfg.retrieval.use_cross_encoder is True
         assert cfg.retrieval.cross_encoder_backend == "onnx"
-        assert cfg.retrieval.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        assert cfg.retrieval.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-12-v2"
 
     def test_mode_b_cross_encoder_enabled(self) -> None:
         cfg = SLMConfig.for_mode(Mode.B)
@@ -240,7 +240,7 @@ class TestV332OnnxCrossEncoderConfig:
         cfg_path = tmp_path / "config.json"
         cfg.save(cfg_path)
         data = json.loads(cfg_path.read_text())
-        assert data["retrieval"]["cross_encoder_model"] == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        assert data["retrieval"]["cross_encoder_model"] == "cross-encoder/ms-marco-MiniLM-L-12-v2"
         assert data["retrieval"]["cross_encoder_backend"] == "onnx"
 
     def test_load_migrates_pre_332_config_respects_explicit_false(self, tmp_path: Path) -> None:
@@ -272,7 +272,7 @@ class TestV332OnnxCrossEncoderConfig:
         # Backend field still added so migration won't trigger again
         assert loaded.retrieval.cross_encoder_backend == "onnx"
         # Migration preserves old default for backward compat (new installs get BGE)
-        assert loaded.retrieval.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        assert loaded.retrieval.cross_encoder_model == "cross-encoder/ms-marco-MiniLM-L-12-v2"
 
     def test_load_auto_enables_ce_when_absent(self, tmp_path: Path) -> None:
         """Pre-3.3.2 configs WITHOUT use_cross_encoder get it auto-enabled."""
@@ -311,7 +311,7 @@ class TestV332OnnxCrossEncoderConfig:
             "retrieval": {
                 "use_cross_encoder": False,  # User explicitly disabled
                 "cross_encoder_backend": "onnx",
-                "cross_encoder_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+                "cross_encoder_model": "cross-encoder/ms-marco-MiniLM-L-12-v2",
             },
         }
         cfg_path.write_text(json.dumps(post_config))

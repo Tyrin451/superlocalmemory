@@ -68,9 +68,9 @@ class TestToolRegistration:
             assert name in srv._tools, f"Missing core tool: {name}"
 
     def test_active_tools_registers_expected_count(self):
-        """register_active_tools registers the 3 active tools on the server.
+        """register_active_tools registers the 4 active tools on the server.
 
-        Expected: session_init, observe, report_feedback.
+        Expected: session_init, observe, report_feedback, close_session.
         """
         from superlocalmemory.mcp.tools_active import register_active_tools
 
@@ -78,11 +78,11 @@ class TestToolRegistration:
         get_engine = MagicMock()
         register_active_tools(srv, get_engine)
 
-        assert len(srv._tools) == 3, (
-            f"Expected 3 active tools, got {len(srv._tools)}: "
+        assert len(srv._tools) == 4, (
+            f"Expected 4 active tools, got {len(srv._tools)}: "
             f"{sorted(srv._tools.keys())}"
         )
-        for name in ("session_init", "observe", "report_feedback"):
+        for name in ("session_init", "observe", "report_feedback", "close_session"):
             assert name in srv._tools, f"Missing active tool: {name}"
 
     def test_tool_names_unique(self):

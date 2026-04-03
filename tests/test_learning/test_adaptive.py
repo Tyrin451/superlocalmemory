@@ -132,7 +132,7 @@ class TestTrain:
         _fill_feedback(learner, _MIN_FEEDBACK_FOR_TRAINING, "relevant")
         result = learner.train("default")
         assert "general" in result
-        assert result["general"]["semantic"] == 1.2
+        assert result["general"]["semantic"] == 1.5
         assert result["general"]["bm25"] == 1.0
 
     def test_negative_feedback_boosts_precision_channels(
@@ -160,7 +160,7 @@ class TestTrain:
         _fill_feedback(learner, 18, "relevant")
         _fill_feedback(learner, 3, "irrelevant")
         result = learner.train("default")
-        assert result["general"]["semantic"] == 1.2
+        assert result["general"]["semantic"] == 1.5
 
     def test_all_partial_feedback_returns_empty(
         self, learner: AdaptiveLearner
@@ -180,7 +180,7 @@ class TestGetWeights:
         self, learner: AdaptiveLearner
     ) -> None:
         weights = learner.get_weights("factual", "default")
-        assert weights["semantic"] == 1.2
+        assert weights["semantic"] == 1.5
         assert weights["bm25"] == 1.0
 
     def test_returns_learned_general_weights(

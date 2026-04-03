@@ -115,7 +115,7 @@ def _worker_main() -> None:
             continue
 
         if cmd == "load":
-            name = req.get("model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+            name = req.get("model_name", "cross-encoder/ms-marco-MiniLM-L-12-v2")
             backend = req.get("backend", "onnx")
             model, active_backend, model_name = _load_model(name, backend)
             _respond({
@@ -133,7 +133,7 @@ def _worker_main() -> None:
                 continue
             if model is None:
                 # Auto-load with defaults
-                name = req.get("model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+                name = req.get("model_name", "cross-encoder/ms-marco-MiniLM-L-12-v2")
                 backend = req.get("backend", "onnx")
                 model, active_backend, model_name = _load_model(name, backend)
             if model is None:
@@ -162,7 +162,7 @@ def _worker_main() -> None:
                 _respond({"ok": False, "error": "Missing query or document"})
                 continue
             if model is None:
-                name = req.get("model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+                name = req.get("model_name", "cross-encoder/ms-marco-MiniLM-L-12-v2")
                 backend = req.get("backend", "onnx")
                 model, active_backend, model_name = _load_model(name, backend)
             if model is None:
@@ -186,22 +186,43 @@ def _worker_main() -> None:
 def _load_model(
     name: str, backend: str,
 ) -> tuple:
-    """Load cross-encoder model. Returns (model, backend_name, model_name)."""
+    """Load cross-encoder model. Returns (model, backend_name, model_name).
+
+    V3.3.13: sentence-transformers 5.x+ supports backend='onnx' for
+    CrossEncoder. We use a 3-tier fallback chain:
+
+      1. ONNX + platform-quantized model (fastest, ~200MB, 2.4ms/pair)
+      2. ONNX + generic model (fast, auto-exported on first use)
+      3. PyTorch (always works, ~500MB, 6ms/pair)
+
+    Cross-platform:
+      Mac ARM64 → model_qint8_arm64.onnx
+      x86_64    → model_quint8_avx2.onnx
+      Fallback  → model.onnx (generic)
+    """
     try:
         from sentence_transformers import CrossEncoder
 
         if backend == "onnx":
+            # Tier 1: Platform-specific quantized ONNX (fastest)
             try:
                 onnx_file = _detect_onnx_variant()
                 m = CrossEncoder(
                     name, backend="onnx",
                     model_kwargs={"file_name": onnx_file},
                 )
+                return m, f"onnx-quantized({onnx_file})", name
+            except Exception:
+                pass
+
+            # Tier 2: Generic ONNX (auto-exported by optimum)
+            try:
+                m = CrossEncoder(name, backend="onnx")
                 return m, "onnx", name
             except Exception:
-                # ONNX failed → try PyTorch
                 pass
-        # PyTorch fallback (or explicit pytorch backend)
+
+        # Tier 3: PyTorch (always works, no ONNX dependency needed)
         m = CrossEncoder(name)
         return m, "pytorch", name
     except ImportError:
@@ -217,4 +238,9 @@ def _respond(data: dict) -> None:
 
 
 if __name__ == "__main__":
-    _worker_main()
+    try:
+        _worker_main()
+    except KeyboardInterrupt:
+        # V3.3.13: Windows CI sends KeyboardInterrupt on test completion.
+        # Exit cleanly instead of printing a traceback that fails CI.
+        sys.exit(0)

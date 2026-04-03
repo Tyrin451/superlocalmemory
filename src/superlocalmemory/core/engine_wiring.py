@@ -454,6 +454,21 @@ def init_retrieval(
         trust_scorer=trust_scorer,
     )
 
+    # V3.3.13: Ensure reranker warmup is in progress.
+    # The CrossEncoderReranker constructor starts background warmup, but
+    # callers can also call warmup_sync() to block until ready.
+    # Here we just log warmup status — benchmark scripts call warmup_sync() explicitly.
+    if reranker is not None:
+        import threading
+        def _log_warmup_status() -> None:
+            ready = reranker.warmup_sync(timeout=180)
+            if ready:
+                logger.info("Cross-encoder reranker warm and ready")
+            else:
+                logger.warning("Cross-encoder reranker warmup failed — recalls will use fallback scoring")
+        t = threading.Thread(target=_log_warmup_status, daemon=True, name="ce-init-warmup")
+        t.start()
+
     # Phase A: Register forgetting filter into the channel registry
     try:
         from superlocalmemory.retrieval.forgetting_filter import register_forgetting_filter

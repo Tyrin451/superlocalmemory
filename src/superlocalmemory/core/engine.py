@@ -79,6 +79,7 @@ class MemoryEngine:
         self._auto_linker = None
         self._graph_analyzer = None
         self._consolidation_engine = None
+        self._maintenance_scheduler = None
         self._hooks = HookRegistry()
 
     # -- Public properties (Phase 2+ access) --------------------------------
@@ -194,6 +195,17 @@ class MemoryEngine:
         # V3.3: Check for embedding model migration on mode switch
         self._check_embedding_migration()
 
+        # V3.3.13: Background maintenance scheduler (Langevin/Ebbinghaus/Sheaf)
+        if self._config.forgetting.enabled:
+            try:
+                from superlocalmemory.core.maintenance_scheduler import MaintenanceScheduler
+                self._maintenance_scheduler = MaintenanceScheduler(
+                    self._db, self._config, self._profile_id,
+                )
+                self._maintenance_scheduler.start()
+            except Exception as exc:
+                logger.debug("Maintenance scheduler init failed: %s", exc)
+
         self._initialized = True
         logger.info(
             "MemoryEngine initialized: mode=%s profile=%s",
@@ -306,6 +318,8 @@ class MemoryEngine:
     # -- Lifecycle ----------------------------------------------------------
 
     def close(self) -> None:
+        if self._maintenance_scheduler is not None:
+            self._maintenance_scheduler.stop()
         self._initialized = False
 
     @property

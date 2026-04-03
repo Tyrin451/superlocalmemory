@@ -156,4 +156,8 @@ def _respond(data: dict) -> None:
 
 
 if __name__ == "__main__":
-    _worker_main()
+    try:
+        _worker_main()
+    except KeyboardInterrupt:
+        # V3.3.13: Windows CI sends KeyboardInterrupt on test completion.
+        sys.exit(0)

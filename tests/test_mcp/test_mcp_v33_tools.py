@@ -84,20 +84,20 @@ class TestV33ToolRegistration:
     """Verify V3.3 tool registration counts and names."""
 
     def test_registers_expected_count(self):
-        """register_v33_tools registers exactly 6 tools."""
+        """register_v33_tools registers exactly 7 tools (v3.3.12: +run_maintenance)."""
         from superlocalmemory.mcp.tools_v33 import register_v33_tools
 
         srv = _MockServer()
         get_engine = MagicMock()
         register_v33_tools(srv, get_engine)
 
-        assert len(srv._tools) == 6, (
-            f"Expected 6 V3.3 tools, got {len(srv._tools)}: "
+        assert len(srv._tools) == 7, (
+            f"Expected 7 V3.3 tools, got {len(srv._tools)}: "
             f"{sorted(srv._tools.keys())}"
         )
 
     def test_expected_tool_names(self):
-        """All 6 expected tool names are present."""
+        """All 7 expected tool names are present."""
         from superlocalmemory.mcp.tools_v33 import register_v33_tools
 
         srv = _MockServer()
@@ -106,6 +106,7 @@ class TestV33ToolRegistration:
         expected = {
             "forget", "quantize", "consolidate_cognitive",
             "get_soft_prompts", "reap_processes", "get_retention_stats",
+            "run_maintenance",
         }
         assert set(srv._tools.keys()) == expected
 
@@ -169,7 +170,7 @@ class TestForgetTool:
         return srv._tools["forget"], engine
 
     def test_forget_returns_success_with_stats(self):
-        """forget tool returns decay cycle stats on success."""
+        """forget tool (dry_run=False) returns decay cycle stats on success."""
         tool, engine = self._get_tool()
 
         mock_result = {
@@ -184,12 +185,12 @@ class TestForgetTool:
             "superlocalmemory.math.ebbinghaus.EbbinghausCurve"
         ):
             MockSched.return_value.run_decay_cycle.return_value = mock_result
-            result = _run(tool())
+            result = _run(tool(dry_run=False))
 
         assert result["success"] is True
         assert result["total"] == 100
         assert result["transitions"] == 8
-        assert result["dry_run"] is True
+        assert result["dry_run"] is False
 
     def test_forget_with_profile(self):
         """forget tool uses provided profile_id."""
@@ -205,7 +206,7 @@ class TestForgetTool:
             "superlocalmemory.math.ebbinghaus.EbbinghausCurve"
         ):
             MockSched.return_value.run_decay_cycle.return_value = mock_result
-            result = _run(tool(profile_id="custom-profile"))
+            result = _run(tool(profile_id="custom-profile", dry_run=False))
 
         assert result["success"] is True
         MockSched.return_value.run_decay_cycle.assert_called_once_with(
@@ -243,7 +244,7 @@ class TestQuantizeTool:
         return srv._tools["quantize"], engine
 
     def test_quantize_returns_success_with_stats(self):
-        """quantize tool returns EAP cycle stats."""
+        """quantize tool (dry_run=False) returns EAP cycle stats."""
         tool, engine = self._get_tool()
 
         mock_result = {
@@ -263,12 +264,12 @@ class TestQuantizeTool:
             "superlocalmemory.math.qjl.QJLEncoder"
         ):
             MockEAP.return_value.run_eap_cycle.return_value = mock_result
-            result = _run(tool())
+            result = _run(tool(dry_run=False))
 
         assert result["success"] is True
         assert result["downgrades"] == 10
         assert result["upgrades"] == 3
-        assert result["dry_run"] is True
+        assert result["dry_run"] is False
 
     def test_quantize_handles_error(self):
         """quantize tool returns success=False on exception."""
@@ -292,7 +293,7 @@ class TestQuantizeTool:
 @dataclass
 class _MockCCQResult:
     """Minimal CCQ pipeline result for testing."""
-    clusters_found: int = 3
+    clusters_processed: int = 3
     blocks_created: int = 2
     facts_archived: int = 15
     compression_ratio: float = 0.45
@@ -324,7 +325,7 @@ class TestConsolidateCognitiveTool:
             result = _run(tool())
 
         assert result["success"] is True
-        assert result["clusters_found"] == 3
+        assert result["clusters_processed"] == 3
         assert result["blocks_created"] == 2
         assert result["facts_archived"] == 15
         assert result["compression_ratio"] == 0.45

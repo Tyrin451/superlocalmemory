@@ -58,10 +58,10 @@ def _make_reranker(**kwargs) -> CrossEncoderReranker:
 # ---------------------------------------------------------------------------
 
 class TestInitialization:
-    def test_default_model_is_l6(self) -> None:
-        """Default model is MiniLM-L-6-v2 (ONNX optimized for Apple Silicon)."""
+    def test_default_model_is_l12(self) -> None:
+        """Default model is MiniLM-L-12-v2 (better quality, ONNX backend)."""
         reranker = _make_reranker()
-        assert reranker._model_name == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        assert reranker._model_name == "cross-encoder/ms-marco-MiniLM-L-12-v2"
         assert reranker._backend == "onnx"
 
     def test_model_not_loaded_at_init(self) -> None:

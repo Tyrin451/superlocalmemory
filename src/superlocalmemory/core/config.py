@@ -154,7 +154,7 @@ class RetrievalConfig:
 
     # Reranking (V3.3.2: ONNX backend enabled for all modes)
     use_cross_encoder: bool = True
-    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
     cross_encoder_backend: str = "onnx"  # "onnx" (~200MB) or "" (PyTorch, ~1.5GB)
 
     # Agentic (Mode C only)
@@ -618,7 +618,7 @@ class SLMConfig:
             # but NEVER override an explicit use_cross_encoder setting.
             # The user's explicit choice always wins.
             if "cross_encoder_backend" not in rt:
-                rt.setdefault("cross_encoder_model", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+                rt.setdefault("cross_encoder_model", "cross-encoder/ms-marco-MiniLM-L-12-v2")
                 rt["cross_encoder_backend"] = "onnx"
                 # Only auto-enable if user didn't explicitly set the field
                 rt.setdefault("use_cross_encoder", True)
