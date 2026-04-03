@@ -321,6 +321,13 @@ def _worker_main() -> None:
         except Exception as exc:
             _respond({"ok": False, "error": str(exc)})
 
+        # V3.3.16: RSS watchdog — self-terminate if memory exceeds 1.5GB.
+        # Parent auto-respawns a fresh worker on next request.
+        import resource
+        rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
+        if rss_mb > 1500:
+            sys.exit(0)
+
 
 def _respond(data: dict) -> None:
     sys.stdout.write(json.dumps(data) + "\n")
@@ -328,4 +335,7 @@ def _respond(data: dict) -> None:
 
 
 if __name__ == "__main__":
-    _worker_main()
+    try:
+        _worker_main()
+    except KeyboardInterrupt:
+        sys.exit(0)

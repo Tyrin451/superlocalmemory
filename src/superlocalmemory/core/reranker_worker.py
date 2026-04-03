@@ -174,6 +174,13 @@ def _worker_main() -> None:
                 })
             except Exception as exc:
                 _respond({"ok": False, "error": str(exc)})
+
+            # V3.3.16: RSS watchdog — same as embedding_worker
+            import resource
+            rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
+            if rss_mb > 1500:
+                sys.exit(0)
+
             continue
 
         if cmd == "score":
