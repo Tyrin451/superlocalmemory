@@ -207,11 +207,29 @@ class EmbeddingService:
                 return resp["vectors"]
             except (BrokenPipeError, OSError, json.JSONDecodeError) as exc:
                 logger.warning(
-                    "Embedding worker communication failed: %s. "
-                    "Run 'slm doctor' to check dependencies and Python version.",
+                    "Embedding worker communication failed: %s — respawning.",
                     exc,
                 )
                 self._kill_worker()
+                # V3.3.16: Auto-retry once after worker death (RSS watchdog
+                # or crash). Respawn + re-send instead of returning None.
+                try:
+                    self._ensure_worker()
+                    if self._worker_proc is not None:
+                        self._worker_proc.stdin.write(req)
+                        self._worker_proc.stdin.flush()
+                        resp_line = self._readline_with_timeout(
+                            self._worker_proc.stdout,
+                            _SUBPROCESS_RESPONSE_TIMEOUT,
+                        )
+                        if resp_line:
+                            resp = json.loads(resp_line)
+                            if resp.get("ok"):
+                                self._reset_idle_timer()
+                                self._request_count = 1
+                                return resp["vectors"]
+                except Exception:
+                    self._kill_worker()
                 return None
 
     @staticmethod
