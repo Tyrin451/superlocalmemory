@@ -40,6 +40,9 @@ os.environ["PYTORCH_MPS_MEM_LIMIT"] = "0"
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["TORCH_DEVICE"] = "cpu"
+# V3.3.17: Disable CoreML EP for ONNX Runtime. CoreML compiles execution
+# plans that consume 3-5GB on ARM64 Mac. CPU EP is ~500MB and fast enough.
+os.environ["ORT_DISABLE_COREML"] = "1"
 
 # SIGTERM bridge for Docker/systemd
 if sys.platform != "win32":
