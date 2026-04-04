@@ -46,10 +46,12 @@ class SpreadingActivationConfig:
     alpha: float = 1.0           # Seed scaling factor
     delta: float = 0.5           # Node retention / self-decay per iteration
     spreading_factor: float = 0.8  # S: energy diffusion rate
-    theta: float = 0.5           # Activation threshold for sigmoid
-    top_m: int = 7               # Lateral inhibition: max active nodes
+    # V3.3.20: Recalibrated for SLM graph density (254K edges, 768d).
+    # SYNAPSE defaults (theta=0.5, top_m=7) were for 384d sparse graphs.
+    theta: float = 0.2           # Activation threshold for sigmoid (was 0.5)
+    top_m: int = 20              # Lateral inhibition: max active nodes (was 7)
     max_iterations: int = 3      # T: propagation depth
-    tau_gate: float = 0.12       # FOK confidence gate
+    tau_gate: float = 0.05       # FOK confidence gate (was 0.12)
     enabled: bool = True         # Ships enabled by default
 
 

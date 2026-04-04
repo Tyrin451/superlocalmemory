@@ -172,7 +172,12 @@ def run_store(
     # This ensures BM25 and semantic search can always find the original text.
     # V3.3.12: Extract entities from verbatim content so entity channel + temporal
     # channel can find it (was entities=[] which made 4/6 channels blind).
-    if content.strip() and len(content.strip()) >= 20:
+    # V3.3.20: Stronger verbatim filter — skip greetings, filler, short phrases.
+    # Verbatim facts with just "Hey! How are you?" dilute embeddings and add noise.
+    _MIN_VERBATIM_WORDS = 8
+    if (content.strip()
+            and len(content.strip()) >= 40
+            and len(content.strip().split()) >= _MIN_VERBATIM_WORDS):
         import uuid
         import re as _re
         _verbatim_text = content.strip()
