@@ -97,26 +97,54 @@ def register_core_tools(server, get_engine: Callable) -> None:
         """
         import asyncio
         try:
-            from superlocalmemory.core.worker_pool import WorkerPool
-            pool = WorkerPool.shared()
-            # V3.3.19: Run store in thread pool so it doesn't block the
-            # MCP event loop. Before this fix, every remember call blocked
-            # the IDE/agent for 11-17s in Mode B (Ollama LLM fact extraction).
-            result = await asyncio.to_thread(
-                pool.store, content, metadata={
-                    "tags": tags, "project": project,
-                    "importance": importance, "agent_id": agent_id,
-                    "session_id": session_id,
-                },
-            )
-            if result.get("ok"):
-                _emit_event("memory.created", {
-                    "content_preview": content[:80],
-                    "agent_id": agent_id,
-                    "fact_count": result.get("count", 0),
-                }, source_agent=agent_id)
-                return {"success": True, "fact_ids": result.get("fact_ids", []), "count": result.get("count", 0)}
-            return {"success": False, "error": result.get("error", "Store failed")}
+            # V3.3.27: Store-first pattern — write to pending.db immediately
+            # (<100ms), then process through full pipeline in background.
+            # This eliminates the 30-40s blocking that Mode B users experience.
+            # Pending memories are auto-processed on next engine.initialize()
+            # or by the daemon's background loop.
+            from superlocalmemory.cli.pending_store import store_pending, mark_done
+
+            pending_id = store_pending(content, tags=tags, metadata={
+                "project": project,
+                "importance": importance,
+                "agent_id": agent_id,
+                "session_id": session_id,
+            })
+
+            # Fire-and-forget: process in background thread
+            async def _process_in_background():
+                try:
+                    from superlocalmemory.core.worker_pool import WorkerPool
+                    pool = WorkerPool.shared()
+                    result = await asyncio.to_thread(
+                        pool.store, content, metadata={
+                            "tags": tags, "project": project,
+                            "importance": importance, "agent_id": agent_id,
+                            "session_id": session_id,
+                        },
+                    )
+                    if result.get("ok"):
+                        mark_done(pending_id)
+                        _emit_event("memory.created", {
+                            "content_preview": content[:80],
+                            "agent_id": agent_id,
+                            "fact_count": result.get("count", 0),
+                        }, source_agent=agent_id)
+                except Exception as _bg_exc:
+                    logger.warning(
+                        "Background store failed (pending_id=%s): %s",
+                        pending_id, _bg_exc,
+                    )
+
+            asyncio.create_task(_process_in_background())
+
+            return {
+                "success": True,
+                "fact_ids": [f"pending:{pending_id}"],
+                "count": 1,
+                "pending": True,
+                "message": "Stored to pending — processing in background.",
+            }
         except Exception as exc:
             logger.exception("remember failed")
             return {"success": False, "error": str(exc)}

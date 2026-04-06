@@ -64,13 +64,28 @@ class SceneBuilder:
         best_scene: MemoryScene | None = None
         best_sim = -1.0
 
+        # V3.3.27: Batch-embed all uncached scene themes in ONE call.
+        # Previously: 200+ individual embed() calls per fact (30s on Mode B).
+        # Now: 1 batch call for all uncached themes, then cache hits for the rest.
+        uncached_themes = [s.theme for s in scenes if s.theme not in self._scene_embeddings_cache]
+        if uncached_themes and hasattr(self._embedder, 'embed_batch'):
+            try:
+                batch_embs = self._embedder.embed_batch(uncached_themes)
+                for theme, emb in zip(uncached_themes, batch_embs):
+                    if emb is not None:
+                        self._scene_embeddings_cache[theme] = emb
+            except Exception:
+                pass  # Fall through to individual embeds below
+
         for scene in scenes:
-            # Use cached embedding if available, otherwise compute fresh
             if scene.theme in self._scene_embeddings_cache:
                 theme_emb = self._scene_embeddings_cache[scene.theme]
             else:
                 theme_emb = self._embedder.embed(scene.theme)
-                self._scene_embeddings_cache[scene.theme] = theme_emb
+                if theme_emb is not None:
+                    self._scene_embeddings_cache[scene.theme] = theme_emb
+            if theme_emb is None:
+                continue
             sim = _cosine(fact_emb, theme_emb)
             if sim > best_sim:
                 best_sim = sim

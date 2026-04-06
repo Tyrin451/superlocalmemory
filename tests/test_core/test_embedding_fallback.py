@@ -113,11 +113,20 @@ class TestEngineEmbedderAutoDetect:
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
     def test_auto_detects_ollama_when_llm_ollama(self, _mock, tmp_path: Path) -> None:
-        """When LLM=ollama and Ollama has embed model → use OllamaEmbedder."""
-        from superlocalmemory.core.ollama_embedder import OllamaEmbedder
+        """V3.3.27: Mode B hybrid uses sentence-transformers for embeddings.
+
+        When LLM=ollama, Mode B now prefers EmbeddingService (subprocess)
+        for fast batched embeddings. Ollama is only used for LLM chat.
+        """
+        from superlocalmemory.core.embeddings import EmbeddingService
         engine = self._make_engine(tmp_path=tmp_path)
-        embedder = init_embedder(engine._config)
-        assert isinstance(embedder, OllamaEmbedder)
+        with patch("superlocalmemory.core.embeddings.EmbeddingService") as MockES:
+            mock_instance = MagicMock()
+            mock_instance.is_available = True
+            MockES.return_value = mock_instance
+            embedder = init_embedder(engine._config)
+        # V3.3.27: Mode B hybrid → sentence-transformers, not Ollama
+        assert embedder is mock_instance
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: False))
     def test_falls_back_to_st_when_ollama_unavailable(self, _mock, tmp_path: Path) -> None:
@@ -144,11 +153,28 @@ class TestEngineEmbedderAutoDetect:
         assert embedder is None
 
     @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
-    def test_explicit_ollama_provider(self, _mock, tmp_path: Path) -> None:
-        """When provider=ollama explicitly → use OllamaEmbedder."""
-        from superlocalmemory.core.ollama_embedder import OllamaEmbedder
+    def test_explicit_ollama_provider_mode_b_hybrid(self, _mock, tmp_path: Path) -> None:
+        """V3.3.27: Mode B with provider=ollama → hybrid (sentence-transformers).
+
+        Mode B now prefers EmbeddingService for fast batched embeddings.
+        Ollama is only used for LLM chat operations.
+        """
         engine = self._make_engine(
             llm_provider="", emb_provider="ollama", tmp_path=tmp_path,
+        )
+        with patch("superlocalmemory.core.embeddings.EmbeddingService") as MockES:
+            mock_instance = MagicMock()
+            mock_instance.is_available = True
+            MockES.return_value = mock_instance
+            embedder = init_embedder(engine._config)
+        assert embedder is mock_instance
+
+    @patch("superlocalmemory.core.ollama_embedder.OllamaEmbedder.is_available", new_callable=lambda: property(lambda self: True))
+    def test_explicit_ollama_provider_mode_a_uses_ollama(self, _mock, tmp_path: Path) -> None:
+        """Mode A with explicit ollama → still uses OllamaEmbedder (no hybrid)."""
+        from superlocalmemory.core.ollama_embedder import OllamaEmbedder
+        engine = self._make_engine(
+            mode=Mode.A, llm_provider="", emb_provider="ollama", tmp_path=tmp_path,
         )
         embedder = init_embedder(engine._config)
         assert isinstance(embedder, OllamaEmbedder)

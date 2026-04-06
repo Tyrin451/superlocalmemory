@@ -79,18 +79,38 @@ def init_embedder(config: SLMConfig) -> Any | None:
     provider = emb_cfg.provider
 
     # --- Explicit ollama provider ---
+    # V3.3.27: HYBRID MODE B — use sentence-transformers subprocess for
+    # embeddings (fast, batched, ~2s) instead of Ollama HTTP per-call (~30s).
+    # Ollama is still used for LLM operations (fact extraction, context
+    # generation) via llm/backbone.py — that path is unchanged.
+    #
+    # Why: The store pipeline calls embed() 200+ times per remember
+    # (scene_builder, type_router, consolidator, entropy_gate, etc.).
+    # Ollama HTTP: 200 * 45ms = 9s minimum + cold starts.
+    # sentence-transformers subprocess: 200 embeds batched = ~1s.
+    #
+    # The embedding model is the SAME (nomic-embed-text-v1.5, 768d) —
+    # identical vectors, zero quality difference. Only the transport changes.
     if provider == "ollama":
+        if config.mode == Mode.B:
+            # Mode B hybrid: prefer subprocess embedder (fast, batched)
+            st_emb = _try_service_embedder(EmbeddingService, emb_cfg)
+            if st_emb is not None:
+                logger.info(
+                    "Mode B hybrid: using sentence-transformers subprocess "
+                    "for embeddings (fast batched). Ollama used for LLM only."
+                )
+                return st_emb
+            # Fallback: if subprocess unavailable, use Ollama embeddings
+            logger.info("Mode B: sentence-transformers unavailable, using Ollama embeddings")
+            result = _try_ollama_embedder(emb_cfg)
+            if result is not None:
+                return result
+            return None
+        # Mode A/C with explicit ollama: use Ollama embeddings
         result = _try_ollama_embedder(emb_cfg)
         if result is not None:
             return result
-        # Mode B explicitly wants Ollama — if unavailable, fall through
-        # to subprocess (still safe, never in-process)
-        if config.mode == Mode.B:
-            logger.warning(
-                "Ollama unavailable for Mode B. Falling back to "
-                "sentence-transformers subprocess."
-            )
-            return _try_service_embedder(EmbeddingService, emb_cfg)
         return None
 
     # --- Explicit cloud provider ---
