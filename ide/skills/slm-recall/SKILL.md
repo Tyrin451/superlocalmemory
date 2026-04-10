@@ -2,7 +2,7 @@
 name: slm-recall
 description: Search and retrieve memories using semantic similarity, knowledge graph relationships, and full-text search. Use when the user asks to recall information, search memories, find past decisions, or query stored knowledge. Returns ranked results with relevance scores.
 version: "3.0.0"
-license: Elastic-2.0
+license: AGPL-3.0-or-later
 compatibility: "Requires SuperLocalMemory V3 installed at ~/.superlocalmemory/"
 attribution:
   creator: Varun Pratap Bhardwaj
@@ -320,7 +320,7 @@ slm recall "query" --format csv
 
 **Created by:** [Varun Pratap Bhardwaj](https://github.com/varun369) (Solution Architect)
 **Project:** SuperLocalMemory V3
-**License:** Elastic License 2.0 (see [LICENSE](../../LICENSE))
+**License:** AGPL-3.0 (see [LICENSE](../../LICENSE))
 **Repository:** https://github.com/qualixar/superlocalmemory
 
-*Open source doesn't mean removing credit. Attribution must be preserved per Elastic License 2.0 terms.*
+*Open source doesn't mean removing credit. Attribution must be preserved per AGPL-3.0 terms.*

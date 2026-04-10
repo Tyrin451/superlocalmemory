@@ -15,7 +15,7 @@
   <a href="https://arxiv.org/abs/2603.14588"><img src="https://img.shields.io/badge/arXiv-2603.14588-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv Paper"/></a>
   <a href="https://pypi.org/project/superlocalmemory/"><img src="https://img.shields.io/pypi/v/superlocalmemory?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI"/></a>
   <a href="https://www.npmjs.com/package/superlocalmemory"><img src="https://img.shields.io/npm/v/superlocalmemory?style=for-the-badge&logo=npm&logoColor=white" alt="npm"/></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Elastic%202.0-blue?style=for-the-badge" alt="Elastic License 2.0"/></a>
+  <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge" alt="AGPL v3"/></a>
   <a href="#eu-ai-act-compliance"><img src="https://img.shields.io/badge/EU_AI_Act-Compliant-brightgreen?style=for-the-badge" alt="EU AI Act"/></a>
   <a href="https://superlocalmemory.com"><img src="https://img.shields.io/badge/Web-superlocalmemory.com-ff6b35?style=for-the-badge" alt="Website"/></a>
   <a href="#dual-interface-mcp--cli"><img src="https://img.shields.io/badge/MCP-Native-blue?style=for-the-badge" alt="MCP Native"/></a>
@@ -400,7 +400,7 @@ Auto-capture hooks: `slm hooks install` + `slm observe` + `slm session-context`.
 - 17+ IDE integrations (Claude, Cursor, Windsurf, VS Code, JetBrains, Zed, etc.)
 - 35 MCP tools + 7 MCP resources
 - Profile isolation (independent memory spaces)
-- 1400+ tests, Elastic License 2.0, cross-platform (Mac/Linux/Windows)
+- 1400+ tests, AGPL v3, cross-platform (Mac/Linux/Windows)
 - CPU-only — no GPU required
 - Automatic orphaned process cleanup
 
@@ -509,7 +509,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. [Wiki](https://github.com
 
 ## License
 
-Elastic License 2.0. See [LICENSE](LICENSE). Previously MIT — changed April 2026 to protect research IP while keeping the project open for use and contributions.
+GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE).
+
+For commercial licensing (closed-source, proprietary, or hosted use), see [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md) or contact varun.pratap.bhardwaj@gmail.com.
+
+Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar.
 
 ## Attribution
 

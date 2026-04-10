@@ -296,5 +296,5 @@ superlocalmemoryv2-profile create work
 
 <p align="center">
   <strong>Built by <a href="https://github.com/varun369">Varun Pratap Bhardwaj</a></strong><br/>
-  Elastic License 2.0 • <a href="https://superlocalmemory.com">superlocalmemory.com</a>
+  AGPL-3.0 • <a href="https://superlocalmemory.com">superlocalmemory.com</a>
 </p>

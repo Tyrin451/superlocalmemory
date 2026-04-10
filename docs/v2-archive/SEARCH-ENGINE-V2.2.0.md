@@ -738,9 +738,9 @@ cache = CacheManager(
 
 ## License
 
-Elastic License 2.0 - See [LICENSE](../LICENSE) file
+AGPL-3.0 - See [LICENSE](../LICENSE) file
 
-**Attribution Required:** This notice must be preserved in all copies per Elastic License 2.0 terms.
+**Attribution Required:** This notice must be preserved in all copies per AGPL-3.0 terms.
 
 ---
 

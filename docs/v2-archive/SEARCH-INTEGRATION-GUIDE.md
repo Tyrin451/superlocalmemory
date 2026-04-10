@@ -499,4 +499,4 @@ pip install scikit-learn numpy
 ---
 
 **Created by:** Varun Pratap Bhardwaj
-**License:** Elastic License 2.0
+**License:** AGPL-3.0

@@ -5,6 +5,9 @@ All notable changes to SuperLocalMemory V3 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### [Unreleased]
+- **License:** Changed from Elastic-2.0 to AGPL-3.0-or-later to protect research IP
+
 ---
 
 ## Author

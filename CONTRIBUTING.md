@@ -197,7 +197,7 @@ superlocalmemory/
 ├── README.md                     # Project overview
 ├── CONTRIBUTING.md               # This file
 ├── CHANGELOG.md                  # Version history
-├── LICENSE                       # Elastic License 2.0
+├── LICENSE                       # AGPL-3.0-or-later
 └── SECURITY.md                   # Security policy
 ```
 
@@ -651,7 +651,7 @@ Maintainers are responsible for:
 
 ## License
 
-By contributing to SuperLocalMemory V3, you agree that your contributions will be licensed under the Elastic License 2.0.
+By contributing to SuperLocalMemory V3, you agree that your contributions will be licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
 
 See [LICENSE](LICENSE) for details.
 

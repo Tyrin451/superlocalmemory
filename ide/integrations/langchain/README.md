@@ -97,7 +97,7 @@ This means your LangChain conversations are visible in the SLM dashboard, search
 
 ## License
 
-Elastic License 2.0 -- see [LICENSE](../../LICENSE) for details.
+AGPL-3.0 -- see [LICENSE](../../LICENSE) for details.
 
 ## Links
 

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar
-# Licensed under the Elastic License 2.0
+# Licensed under AGPL-3.0-or-later
 
 """Tests for AutoParameterizeHook (Phase F: The Learning Brain).
 
