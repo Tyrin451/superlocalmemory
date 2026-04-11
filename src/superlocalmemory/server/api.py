@@ -176,8 +176,16 @@ def create_app() -> FastAPI:
     application.include_router(ws_router)
     application.include_router(v3_router)
 
+    # v3.4.1: Chat SSE endpoint
+    for _module_name_v341 in ("chat",):
+        try:
+            _mod_v341 = __import__(f"superlocalmemory.server.routes.{_module_name_v341}", fromlist=["router"])
+            application.include_router(_mod_v341.router)
+        except (ImportError, Exception):
+            pass
+
     # Graceful optional routers
-    for _module_name in ("learning", "lifecycle", "behavioral", "compliance"):
+    for _module_name in ("learning", "lifecycle", "behavioral", "compliance", "insights", "timeline"):
         try:
             _mod = __import__(f"superlocalmemory.server.routes.{_module_name}", fromlist=["router"])
             application.include_router(_mod.router)

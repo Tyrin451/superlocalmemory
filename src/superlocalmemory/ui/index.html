@@ -654,6 +654,9 @@
                     </button>
                 </div>
                 <span class="text-white-50 d-none d-md-inline" id="navbar-subtitle">Knowledge Graph Explorer</span>
+                <a href="https://github.com/qualixar/superlocalmemory" target="_blank" class="btn btn-sm btn-outline-light ms-2 d-none d-md-inline-flex align-items-center" style="font-size:0.75rem; gap:4px;" title="Star us on GitHub">
+                    <i class="bi bi-github"></i> <i class="bi bi-star"></i> Star
+                </a>
                 <button class="btn btn-sm theme-toggle" id="refresh-dashboard-btn" onclick="refreshDashboard()" title="Refresh Dashboard" style="padding:4px 8px;">
                     <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
                 </button>
@@ -894,7 +897,7 @@
                     <div class="row align-items-center mb-2">
                         <div class="col-md-8">
                             <h5 class="mb-0">Interactive Knowledge Graph</h5>
-                            <small class="text-muted">Zoom, pan, click nodes to explore • Powered by Cytoscape.js</small>
+                            <small class="text-muted" id="graph-renderer-label">Zoom, pan, click nodes to explore • <span id="graph-engine-name">Sigma.js WebGL</span></small>
                             <div id="graph-stats" class="mt-2"></div>
                         </div>
                         <div class="col-md-4 text-end">
@@ -902,62 +905,161 @@
                                 <i class="bi bi-arrow-clockwise"></i> Refresh
                             </button>
                             <select class="form-select form-select-sm d-inline-block w-auto" id="graph-max-nodes" onchange="loadGraph()" aria-label="Select maximum number of nodes to display">
-                                <option value="50" selected>50 nodes</option>
+                                <option value="50">50 nodes</option>
                                 <option value="100">100 nodes</option>
-                                <option value="200">200 nodes</option>
+                                <option value="200" selected>200 nodes</option>
                                 <option value="500">500 nodes</option>
+                                <option value="1000">1,000 nodes</option>
+                                <option value="2000">2,000 nodes</option>
+                                <option value="5000">All (5K+)</option>
                             </select>
                         </div>
                     </div>
-                    <div class="row align-items-center">
-                        <div class="col-md-6">
-                            <label class="form-label mb-1 small" for="graph-layout-selector">Layout Algorithm:</label>
-                            <select class="form-select form-select-sm" id="graph-layout-selector" onchange="changeGraphLayout(this.value)" aria-label="Select graph layout algorithm">
-                                <option value="fcose" selected>Force-Directed (Fast)</option>
-                                <option value="cose">Force-Directed (Classic)</option>
-                                <option value="circle">Circular</option>
-                                <option value="grid">Grid</option>
-                                <option value="breadthfirst">Hierarchical</option>
-                                <option value="concentric">Concentric (by Importance)</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6">
-                            <!-- Clear status indicator - shows what user is viewing -->
-                            <div id="graph-status-container">
-                                <!-- When viewing FULL graph (default state) -->
-                                <div id="graph-status-full" style="display:block;" role="status" aria-live="polite">
-                                    <div class="d-flex align-items-center">
-                                        <span class="text-muted small">
-                                            <i class="bi bi-diagram-3"></i> <span id="graph-status-full-text">Showing all memories</span>
-                                        </span>
-                                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="loadGraph()" aria-label="Refresh current graph view">
-                                            <i class="bi bi-arrow-clockwise"></i> Refresh
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <!-- When viewing FILTERED by cluster (show BIG clear button) -->
-                                <div id="graph-status-filtered" style="display:none;" role="status" aria-live="polite">
-                                    <div class="alert alert-info py-2 px-3 mb-0 d-flex align-items-center justify-content-between">
-                                        <span>
-                                            <i class="bi bi-funnel-fill"></i>
-                                            <strong id="graph-filter-description">Viewing Cluster X</strong>
-                                            <span class="small text-muted ms-2" id="graph-filter-count">(X memories)</span>
-                                        </span>
-                                        <button class="btn btn-primary btn-sm ms-3" onclick="clearGraphFilters()" aria-label="Clear filter and show all memories">
-                                            <i class="bi bi-grid-3x3"></i> Show All Memories
-                                        </button>
-                                    </div>
-                                </div>
+                    <!-- Filter status (kept for cluster/modal integration) -->
+                    <div id="graph-status-container" style="display:none;">
+                        <div id="graph-status-full"></div>
+                        <div id="graph-status-filtered"></div>
+                    </div>
+                </div>
+                <!-- v3.4.1: Sigma.js controls bar -->
+                <div class="row g-2 mb-2" id="sigma-controls">
+                    <div class="col-12">
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="input-group input-group-sm" style="max-width:400px;">
+                                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                <input type="text" class="form-control" id="sigma-search-input"
+                                       placeholder="Search memories in graph..." aria-label="Search graph nodes"
+                                       oninput="sigmaSearch(this.value)">
+                                <button class="btn btn-outline-secondary" type="button"
+                                        onclick="sigmaClearSearch(); document.getElementById('sigma-search-input').value='';">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                            </div>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-secondary" onclick="sigmaZoomIn()" title="Zoom In"><i class="bi bi-zoom-in"></i></button>
+                                <button class="btn btn-outline-secondary" onclick="sigmaZoomOut()" title="Zoom Out"><i class="bi bi-zoom-out"></i></button>
+                                <button class="btn btn-outline-secondary" onclick="sigmaResetView()" title="Reset View"><i class="bi bi-arrows-angle-expand"></i></button>
                             </div>
                         </div>
                     </div>
                 </div>
-                <div id="graph-container"
-                     role="application"
-                     aria-label="Interactive knowledge graph - use Tab to navigate nodes, Enter to view details, Arrow keys to move between adjacent nodes, Escape to clear filters"
-                     aria-describedby="graph-stats"
-                     style="width:100%; height:600px; border:1px solid #dee2e6; border-radius:8px; background:#f8f9fa;">
+
+                <div class="row g-2">
+                    <!-- LEFT PANEL: Legend + Communities + Stats -->
+                    <div class="col-md-2" id="graph-left-panel">
+                        <div class="card p-2" style="font-size:0.8rem; max-height:550px; overflow-y:auto;">
+                            <h6 class="mb-2"><i class="bi bi-palette"></i> Legend</h6>
+                            <div class="mb-1"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#667eea;"></span> Semantic</div>
+                            <div class="mb-1"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#43e97b;"></span> Episodic</div>
+                            <div class="mb-1"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#f093fb;"></span> Opinion</div>
+                            <div class="mb-1"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#4facfe;"></span> Temporal</div>
+                            <hr class="my-2">
+                            <h6 class="mb-2 d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-collection"></i> Communities</span>
+                                <div class="btn-group btn-group-sm" role="group" aria-label="Community source">
+                                    <input type="radio" class="btn-check" name="community-source" id="community-live" checked onchange="handleCommunitySourceToggle('live')">
+                                    <label class="btn btn-outline-secondary py-0 px-1" style="font-size:0.65rem;" for="community-live">Live</label>
+                                    <input type="radio" class="btn-check" name="community-source" id="community-backend" onchange="handleCommunitySourceToggle('backend')">
+                                    <label class="btn btn-outline-secondary py-0 px-1" style="font-size:0.65rem;" for="community-backend">Backend</label>
+                                </div>
+                            </h6>
+                            <div class="mb-1" id="community-resolution-container">
+                                <label class="form-label small mb-0">Resolution <span id="community-resolution-value" class="text-muted">1.0</span></label>
+                                <input type="range" class="form-range" id="community-resolution" min="0.1" max="3.0" step="0.1" value="1.0"
+                                       oninput="handleResolutionChange(this.value)">
+                            </div>
+                            <div id="community-list-panel">
+                                <div class="text-muted small">No communities detected yet.</div>
+                                <button class="btn btn-sm btn-outline-primary w-100 mt-1" onclick="runCommunityDetection()">
+                                    <i class="bi bi-cpu"></i> Detect
+                                </button>
+                            </div>
+                            <hr class="my-2">
+                            <h6 class="mb-2"><i class="bi bi-graph-up"></i> Stats</h6>
+                            <div id="sigma-stats-panel">
+                                <div class="text-muted">Loading...</div>
+                            </div>
+                            <hr class="my-2">
+                            <h6 class="mb-2"><i class="bi bi-funnel"></i> Filter</h6>
+                            <select class="form-select form-select-sm mb-1" id="sigma-category-filter"
+                                    onchange="sigmaFilterByCategory(this.value)">
+                                <option value="">All types</option>
+                                <option value="semantic">Semantic</option>
+                                <option value="episodic">Episodic</option>
+                                <option value="opinion">Opinion</option>
+                                <option value="temporal">Temporal</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- CENTER: Graph canvas -->
+                    <div class="col-md-7">
+                        <div id="graph-container"
+                             role="application"
+                             aria-label="Interactive knowledge graph"
+                             aria-describedby="graph-stats"
+                             style="width:100%; height:550px; border:1px solid #dee2e6; border-radius:8px; background:#fafbfc;">
+                        </div>
+                    </div>
+
+                    <!-- RIGHT PANEL: Node detail -->
+                    <div class="col-md-3" id="graph-right-panel">
+                        <div class="card p-2" id="sigma-detail-panel" style="font-size:0.85rem; max-height:550px; overflow-y:auto;">
+                            <h6 class="mb-2"><i class="bi bi-info-circle"></i> Node Detail</h6>
+                            <div id="sigma-detail-content" class="text-muted">
+                                Click a node to see its details, connected memories, and trust score.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- v3.4.1: Quick Insight Actions -->
+                <div class="row g-2 mt-2">
+                    <div class="col-12">
+                        <div class="card p-2">
+                            <div class="d-flex flex-wrap gap-1 mb-2">
+                                <button class="btn btn-sm btn-outline-info" data-insight-action="changed_this_week">
+                                    <i class="bi bi-clock-history"></i> Changed This Week
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning" data-insight-action="opinions">
+                                    <i class="bi bi-lightbulb"></i> Opinions & Rationale
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" data-insight-action="contradictions">
+                                    <i class="bi bi-exclamation-triangle"></i> Contradictions
+                                </button>
+                                <button class="btn btn-sm btn-outline-success" data-insight-action="health">
+                                    <i class="bi bi-heart-pulse"></i> Memory Health
+                                </button>
+                                <button class="btn btn-sm btn-outline-primary" data-insight-action="cross_project">
+                                    <i class="bi bi-diagram-3"></i> Cross-Project Links
+                                </button>
+                            </div>
+                            <div id="insight-results" style="max-height:300px; overflow-y:auto;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- v3.4.1: Memory Timeline (D3.js) -->
+                <div id="memory-timeline-panel" class="mt-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0"><i class="bi bi-clock-history"></i> Memory Timeline</h6>
+                        <div class="btn-group btn-group-sm" role="group" id="timeline-zoom-group">
+                            <button type="button" class="btn btn-outline-secondary active" data-zoom="week">Week</button>
+                            <button type="button" class="btn btn-outline-secondary" data-zoom="day">Day</button>
+                            <button type="button" class="btn btn-outline-secondary" data-zoom="month">Month</button>
+                        </div>
+                        <div class="btn-group btn-group-sm ms-2" role="group" id="timeline-group-by-group">
+                            <button type="button" class="btn btn-outline-info active" data-groupby="category">By Type</button>
+                            <button type="button" class="btn btn-outline-info" data-groupby="community">By Community</button>
+                        </div>
+                    </div>
+                    <div id="memory-timeline-chart" style="width:100%;height:280px;overflow:hidden;border:1px solid #dee2e6;border-radius:8px;background:#fafbfc;"></div>
+                    <div class="d-flex gap-3 mt-1 small text-muted">
+                        <span><span class="badge" style="background:#198754">&nbsp;</span> High trust (>=0.7)</span>
+                        <span><span class="badge" style="background:#ffc107">&nbsp;</span> Medium (0.4-0.7)</span>
+                        <span><span class="badge" style="background:#dc3545">&nbsp;</span> Low (<0.4)</span>
+                        <span><span class="badge" style="background:#6c757d">&nbsp;</span> Unknown</span>
+                    </div>
                 </div>
 
                 <!-- Skip link for keyboard users -->
@@ -1830,22 +1932,30 @@
     <!-- D3.js (kept for backward compatibility) -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
 
-    <!-- Cytoscape.js + Extensions (v2.6.5 — interactive graph) -->
-    <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
-    <script src="https://unpkg.com/layout-base@2.0.1/layout-base.js"></script>
-    <script src="https://unpkg.com/cose-base@2.2.0/cose-base.js"></script>
-    <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
-    <link href="https://unpkg.com/cytoscape-navigator@1.3.3/cytoscape.js-navigator.css" rel="stylesheet" type="text/css" />
-    <script src="https://unpkg.com/cytoscape-navigator@1.3.3/cytoscape-navigator.js"></script>
+    <!-- Cytoscape.js REMOVED in v3.4.1 — replaced by Sigma.js WebGL -->
+
+    <!-- Sigma.js v3 + graphology (v3.4.1 — WebGL graph) -->
+    <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/graphology-library@0.8.0/dist/graphology-library.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
 
     <!-- Modular JS (v2.5 — split from monolith app.js) -->
     <script src="static/js/core.js"></script>
 
-    <!-- Graph Visualization Scripts (v2.6.5 - Modular) -->
-    <script src="static/js/graph-core.js"></script>
-    <script src="static/js/graph-filters.js"></script>
+    <!-- v3.4.1: Event bus (must load before graph + chat) -->
+    <script src="static/js/graph-event-bus.js"></script>
+    <!-- v3.4.1: Sigma.js Knowledge Graph (defines globals: filterState, loadGraph, renderGraph) -->
+    <script src="static/js/knowledge-graph.js"></script>
+    <!-- Shared UI utilities (showLoadingSpinner, updateGraphStats, etc.) -->
     <script src="static/js/graph-ui.js"></script>
-    <script src="static/js/graph-interactions.js"></script>
+    <!-- Filter functions (filterByCluster, filterByEntity — used by clusters.js, modal.js) -->
+    <script src="static/js/graph-filters.js"></script>
+    <!-- v3.4.1: Ask My Memory chat interface -->
+    <script src="static/js/memory-chat.js"></script>
+    <!-- v3.4.1: Quick Insight Actions (5 one-click intelligence buttons) -->
+    <script src="static/js/quick-actions.js"></script>
+    <!-- v3.4.1: Memory Timeline (D3 time axis, zoom, trust colors) -->
+    <script src="static/js/memory-timeline.js"></script>
 
     <script src="static/js/memories.js"></script>
     <script src="static/js/search.js"></script>
@@ -1872,8 +1982,8 @@
     <script src="static/js/fact-detail.js"></script>
 
     <footer>
-        <p>SuperLocalMemory V3 by <a href="https://github.com/varun369">Varun Pratap Bhardwaj</a></p>
-        <p><a href="https://github.com/qualixar/superlocalmemory">GitHub Repository</a> | Elastic License 2.0</p>
+        <p>SuperLocalMemory V3 by <a href="https://github.com/varun369">Varun Pratap Bhardwaj</a> · <a href="https://qualixar.com">Qualixar</a></p>
+        <p><a href="https://github.com/qualixar/superlocalmemory">GitHub</a> · AGPL-3.0-or-later · <a href="https://github.com/qualixar/superlocalmemory/stargazers">⭐ Star us on GitHub</a></p>
     </footer>
 </body>
 </html>

@@ -53,6 +53,9 @@ class SpreadingActivationConfig:
     max_iterations: int = 3      # T: propagation depth
     tau_gate: float = 0.05       # FOK confidence gate (was 0.12)
     enabled: bool = True         # Ships enabled by default
+    # v3.4.1: Graph intelligence integration
+    use_pagerank_bias: bool = False    # Multiply propagation by target PageRank
+    community_boost: float = 0.0       # Boost same-community nodes (0.0 = disabled)
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +85,11 @@ class SpreadingActivation:
         self._db = db
         self._vector_store = vector_store
         self._config = config or SpreadingActivationConfig()
+        # v3.4.1: Graph intelligence caches (loaded lazily per profile)
+        self._pr_cache: dict[str, float] = {}
+        self._pr_profile: str = ""
+        self._comm_cache: dict[str, int | None] = {}
+        self._comm_profile: str = ""
 
     def search(
         self,
@@ -311,3 +319,40 @@ class SpreadingActivation:
             return len(result) if result else 0
         except Exception:
             return 0
+
+    # ── v3.4.1: Graph Intelligence Helpers ────────────────────────
+
+    def _load_graph_metrics_cache(self, profile_id: str) -> None:
+        """Load PageRank + community data in a single SQL query.
+
+        Called lazily on first _get_pagerank() or _get_community() call.
+        Populates both _pr_cache and _comm_cache.
+        """
+        if self._pr_profile == profile_id and self._pr_cache:
+            return  # Already loaded for this profile
+        self._pr_cache = {}
+        self._pr_profile = profile_id
+        self._comm_cache = {}
+        self._comm_profile = profile_id
+        try:
+            rows = self._db.execute(
+                "SELECT fact_id, pagerank_score, community_id "
+                "FROM fact_importance WHERE profile_id = ?",
+                (profile_id,),
+            )
+            for r in rows:
+                d = dict(r)
+                self._pr_cache[d["fact_id"]] = float(d.get("pagerank_score", 0) or 0)
+                self._comm_cache[d["fact_id"]] = d.get("community_id")
+        except Exception:
+            pass
+
+    def _get_pagerank(self, fact_id: str, profile_id: str) -> float:
+        """Look up PageRank score from fact_importance. Cached per profile."""
+        self._load_graph_metrics_cache(profile_id)
+        return self._pr_cache.get(fact_id, 0.0)
+
+    def _get_community(self, fact_id: str, profile_id: str) -> int | None:
+        """Look up community_id from fact_importance. Shares unified cache."""
+        self._load_graph_metrics_cache(profile_id)
+        return self._comm_cache.get(fact_id)

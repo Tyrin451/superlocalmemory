@@ -123,7 +123,7 @@ function setupGraphEventListeners() {
         graphTab.addEventListener('shown.bs.tab', function(event) {
             console.log('[Event] Knowledge Graph tab SHOWN (tab switch)');
 
-            if (cy) {
+            if (cy || sigmaInstance) {
                 // Graph already exists - user is returning to KG tab from another tab
                 // Clear filter and reload to show full graph
                 console.log('[Event] Returning to KG tab from another tab - clearing filter');

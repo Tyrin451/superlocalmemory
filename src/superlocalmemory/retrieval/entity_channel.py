@@ -91,6 +91,7 @@ class EntityGraphChannel:
         entity_resolver: EntityResolver | None = None,
         decay: float = 0.7, activation_threshold: float = 0.05,
         max_hops: int = 4,
+        graph_metrics: dict[str, dict] | None = None,
     ) -> None:
         self._db = db
         self._resolver = entity_resolver
@@ -101,6 +102,9 @@ class EntityGraphChannel:
         self._adj: dict[str, list[tuple[str, float]]] = {}
         self._adj_profile: str = ""  # Track which profile is loaded
         self._adj_edge_count: int = 0  # Track edge count for staleness detection
+        # v3.4.1: Graph intelligence metrics (loaded from fact_importance)
+        self._graph_metrics: dict[str, dict] = graph_metrics or {}
+        self._graph_metrics_profile: str = ""
 
     def _ensure_adjacency(self, profile_id: str) -> None:
         """Load graph adjacency into memory for fast spreading activation.
@@ -133,6 +137,8 @@ class EntityGraphChannel:
         self._adj_edge_count = current_count
         # Also load entity maps (same staleness lifecycle)
         self._load_entity_maps(profile_id)
+        # v3.4.1: Load graph intelligence metrics (P0)
+        self._load_graph_metrics(profile_id)
 
         logger.info(
             "Loaded adjacency cache: %d nodes, %d edges, %d entity mappings for profile %s",
@@ -192,6 +198,37 @@ class EntityGraphChannel:
             len(self._entity_to_facts), len(self._fact_to_entities),
         )
 
+    def _load_graph_metrics(self, profile_id: str) -> None:
+        """Load PageRank, community_id, degree_centrality from fact_importance.
+
+        v3.4.1: Enables graph-enhanced retrieval (P0).
+        Called alongside adjacency loading. Same staleness lifecycle.
+        """
+        if self._graph_metrics_profile == profile_id and self._graph_metrics:
+            return
+        self._graph_metrics = {}
+        self._graph_metrics_profile = profile_id
+        try:
+            rows = self._db.execute(
+                "SELECT fact_id, pagerank_score, community_id, degree_centrality "
+                "FROM fact_importance WHERE profile_id = ?",
+                (profile_id,),
+            )
+            for r in rows:
+                d = dict(r)
+                self._graph_metrics[d["fact_id"]] = {
+                    "pagerank_score": float(d.get("pagerank_score", 0) or 0),
+                    "community_id": d.get("community_id"),
+                    "degree_centrality": float(d.get("degree_centrality", 0) or 0),
+                }
+            logger.info(
+                "Loaded graph metrics: %d facts for profile %s",
+                len(self._graph_metrics), profile_id,
+            )
+        except Exception as exc:
+            logger.debug("Graph metrics load failed (graceful degradation): %s", exc)
+            self._graph_metrics = {}
+
     def invalidate_cache(self) -> None:
         """Clear all caches. Call after adding/removing edges or facts."""
         self._adj.clear()
@@ -199,6 +236,8 @@ class EntityGraphChannel:
         self._adj_edge_count = 0
         self._entity_to_facts = defaultdict(list)
         self._fact_to_entities = defaultdict(list)
+        self._graph_metrics.clear()
+        self._graph_metrics_profile = ""
 
     def search(self, query: str, profile_id: str, top_k: int = 50) -> list[tuple[str, float]]:
         """Search via entity graph with spreading activation.
@@ -242,12 +281,20 @@ class EntityGraphChannel:
             for fid in frontier:
                 if use_cache:
                     neighbors = self._adj.get(fid, ())
-                    for neighbor, _weight in neighbors:
-                        propagated = activation[fid] * self._decay
-                        if propagated >= self._threshold and propagated > activation.get(neighbor, 0.0):
-                            activation[neighbor] = propagated
+                    for neighbor, edge_weight in neighbors:
+                        # v3.4.1 P1: Weighted propagation + PageRank bias
+                        weighted = activation[fid] * self._decay * edge_weight
+                        if self._graph_metrics and neighbor in self._graph_metrics:
+                            target_pr = self._graph_metrics[neighbor].get("pagerank_score", 0.0)
+                            pr_boost = min(1.0 + target_pr * 2.0, 2.0)
+                            weighted *= pr_boost
+                        if weighted >= self._threshold and weighted > activation.get(neighbor, 0.0):
+                            activation[neighbor] = weighted
                             next_frontier.add(neighbor)
                 else:
+                    # NOTE: SQL fallback path does NOT use graph intelligence (P1/P2/P3).
+                    # Graph intelligence is only available on the in-memory cache path.
+                    # This fallback exists for mock/test DBs. See Phase 7 LLD H-01.
                     for edge in self._db.get_edges_for_node(fid, profile_id):
                         neighbor = edge.target_id if edge.source_id == fid else edge.source_id
                         propagated = activation[fid] * self._decay
@@ -282,9 +329,93 @@ class EntityGraphChannel:
             if not frontier:
                 break
 
+        # v3.4.1 P2: Community-aware boosting
+        if self._graph_metrics and use_cache:
+            from collections import Counter as _Counter
+            seed_communities: _Counter = _Counter()
+            for eid in canonical_ids:
+                for fid in self._entity_to_facts.get(eid, ()):
+                    m = self._graph_metrics.get(fid, {})
+                    comm = m.get("community_id")
+                    if comm is not None:
+                        seed_communities[comm] += 1
+            if seed_communities:
+                total_seeds = sum(seed_communities.values())
+                for fid in list(activation.keys()):
+                    m = self._graph_metrics.get(fid, {})
+                    fact_comm = m.get("community_id")
+                    if fact_comm is not None and fact_comm in seed_communities:
+                        boost = min(1.0 + 0.15 * (seed_communities[fact_comm] / total_seeds), 1.3)
+                        activation[fid] *= boost
+                    elif fact_comm is not None and fact_comm not in seed_communities:
+                        activation[fid] *= 0.9  # Mild penalty for unrelated communities
+
+        # v3.4.1 P3: Contradiction suppression via graph_edges
+        if use_cache and activation:
+            self._suppress_contradictions(activation, profile_id)
+
+        # v3.4.1: Score normalization to [0, 1]
         results = [(fid, sc) for fid, sc in activation.items() if sc >= self._threshold]
+        if not results:
+            return []
+        max_score = max(sc for _, sc in results)
+        if max_score > 0:
+            results = [(fid, sc / max_score) for fid, sc in results]
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_k]
+
+    def _suppress_contradictions(
+        self, activation: dict[str, float], profile_id: str,
+    ) -> None:
+        """P3: Penalize older fact in contradiction pairs, heavy-penalize superseded.
+
+        Uses graph_edges (edge_type CHECK includes 'contradiction', 'supersedes').
+        """
+        candidate_ids = list(activation.keys())
+        if not candidate_ids:
+            return
+        try:
+            placeholders = ",".join("?" * len(candidate_ids))
+            sql = (
+                "SELECT source_id, target_id, edge_type FROM graph_edges "
+                "WHERE profile_id = ? AND edge_type IN ('contradiction', 'supersedes') "
+                "AND (source_id IN (" + placeholders + ") "
+                "OR target_id IN (" + placeholders + "))"
+            )
+            rows = self._db.execute(sql, (profile_id, *candidate_ids, *candidate_ids))
+            edges = [dict(r) for r in rows]
+            if not edges:
+                return
+
+            # Batch load created_at for involved facts
+            involved = set()
+            for e in edges:
+                involved.add(e["source_id"])
+                involved.add(e["target_id"])
+            involved = involved & set(candidate_ids)
+            if not involved:
+                return
+            ph2 = ",".join("?" * len(involved))
+            ts_rows = self._db.execute(
+                "SELECT fact_id, created_at FROM atomic_facts "
+                "WHERE fact_id IN (" + ph2 + ") AND profile_id = ?",
+                (*involved, profile_id),
+            )
+            ts_map = {dict(r)["fact_id"]: dict(r).get("created_at", "") for r in ts_rows}
+
+            for e in edges:
+                src, tgt, etype = e["source_id"], e["target_id"], e["edge_type"]
+                if etype == "supersedes" and src in activation:
+                    activation[src] *= 0.3  # Heavy penalty: this fact was replaced
+                elif etype == "contradiction":
+                    src_ts = ts_map.get(src, "")
+                    tgt_ts = ts_map.get(tgt, "")
+                    if src_ts and tgt_ts:
+                        older = src if src_ts < tgt_ts else tgt
+                        if older in activation:
+                            activation[older] *= 0.5
+        except Exception as exc:
+            logger.debug("Contradiction suppression failed: %s", exc)
 
     def _resolve_entities(self, raw: list[str], profile_id: str) -> list[str]:
         """Resolve raw names to canonical entity IDs."""

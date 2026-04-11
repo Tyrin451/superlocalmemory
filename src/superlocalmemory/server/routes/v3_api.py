@@ -1561,6 +1561,156 @@ async def process_health(request: Request):
 
 # ── 1g. GET /api/v3/v33/overview ─────────────────────────────
 
+# ── v3.4.1: Graph Communities ──────────────────────────────────
+
+@router.get("/graph/communities")
+async def get_graph_communities(request: Request, profile: str = ""):
+    """Get community assignments with TF-IDF labels, entities, and colors.
+
+    v3.4.1: Uses TF-IDF labels from config table (computed by GraphAnalyzer
+    at consolidation time). Falls back to inline word frequency if labels
+    not yet computed.
+    """
+    try:
+        from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
+        import sqlite3
+        pid = profile or get_active_profile()
+
+        if not DB_PATH.exists():
+            return {"communities": [], "total": 0}
+
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+
+        # Get community member counts and average pagerank
+        comm_rows = conn.execute(
+            "SELECT community_id, COUNT(*) AS member_count, "
+            "AVG(pagerank_score) AS pagerank_avg "
+            "FROM fact_importance "
+            "WHERE profile_id = ? AND community_id IS NOT NULL "
+            "GROUP BY community_id ORDER BY member_count DESC",
+            (pid,),
+        ).fetchall()
+
+        if not comm_rows:
+            conn.close()
+            return {"communities": [], "total": 0}
+
+        # Load TF-IDF labels from config table
+        tfidf_labels = {}
+        try:
+            label_key = "community_labels_" + pid
+            label_row = conn.execute(
+                "SELECT value FROM config WHERE key = ?",
+                (label_key,),
+            ).fetchone()
+            if label_row:
+                import json as _json
+                tfidf_labels = _json.loads(dict(label_row)["value"])
+        except Exception:
+            pass
+
+        cluster_colors = [
+            '#667eea', '#764ba2', '#43e97b', '#38f9d7',
+            '#4facfe', '#00f2fe', '#f093fb', '#f5576c',
+            '#fa709a', '#fee140', '#30cfd0', '#330867',
+        ]
+
+        communities = []
+        for row in comm_rows:
+            d = dict(row)
+            comm_id = d["community_id"]
+
+            # Use TF-IDF label if available, else generate inline
+            label = tfidf_labels.get(str(comm_id), "")
+            if not label:
+                # Inline fallback: word frequency from top facts
+                try:
+                    fact_rows = conn.execute(
+                        "SELECT af.content FROM fact_importance fi "
+                        "JOIN atomic_facts af ON fi.fact_id = af.fact_id "
+                        "WHERE fi.profile_id = ? AND fi.community_id = ? "
+                        "ORDER BY fi.pagerank_score DESC LIMIT 20",
+                        (pid, comm_id),
+                    ).fetchall()
+                    from collections import defaultdict as _ddict
+                    wf = _ddict(int)
+                    sw = {"the", "a", "an", "is", "was", "are", "to", "of",
+                          "in", "for", "on", "with", "at", "by", "from",
+                          "and", "but", "or", "not", "it", "this", "that",
+                          "i", "we", "they", "he", "she", "you", "my"}
+                    for fr in fact_rows:
+                        for w in (dict(fr).get("content", "")).lower().split():
+                            w = w.strip(".,;:!?\"'()[]{}")
+                            if len(w) > 2 and w not in sw:
+                                wf[w] += 1
+                    top = sorted(wf.items(), key=lambda x: x[1], reverse=True)[:3]
+                    label = ", ".join(w for w, _ in top) if top else f"Community {comm_id}"
+                except Exception:
+                    label = f"Community {comm_id}"
+
+            # Get top entities from canonical_entities_json
+            top_entities = []
+            try:
+                ent_rows = conn.execute(
+                    "SELECT af.canonical_entities_json FROM fact_importance fi "
+                    "JOIN atomic_facts af ON fi.fact_id = af.fact_id "
+                    "WHERE fi.profile_id = ? AND fi.community_id = ? "
+                    "ORDER BY fi.pagerank_score DESC LIMIT 10",
+                    (pid, comm_id),
+                ).fetchall()
+                import json as _json2
+                entity_counts: dict = {}
+                for er in ent_rows:
+                    raw = dict(er).get("canonical_entities_json", "")
+                    if raw:
+                        try:
+                            for ent in _json2.loads(raw):
+                                entity_counts[ent] = entity_counts.get(ent, 0) + 1
+                        except (ValueError, TypeError):
+                            pass
+                top_entities = sorted(
+                    entity_counts, key=entity_counts.get, reverse=True,
+                )[:5]
+            except Exception:
+                pass
+
+            communities.append({
+                "community_id": comm_id,
+                "label": label,
+                "member_count": d["member_count"],
+                "top_entities": top_entities,
+                "color": cluster_colors[comm_id % len(cluster_colors)],
+                "pagerank_avg": round(float(d["pagerank_avg"] or 0), 4),
+            })
+
+        conn.close()
+        return {"communities": communities, "total": len(communities)}
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/graph/run-communities")
+async def run_community_detection(request: Request):
+    """Trigger community detection manually (runs GraphAnalyzer)."""
+    try:
+        from superlocalmemory.server.routes.helpers import get_active_profile, DB_PATH
+        from superlocalmemory.storage.database import DatabaseManager
+        from superlocalmemory.storage import schema as _schema
+        from superlocalmemory.core.graph_analyzer import GraphAnalyzer
+
+        pid = get_active_profile()
+        db = DatabaseManager(DB_PATH)
+        db.initialize(_schema)
+
+        analyzer = GraphAnalyzer(db)
+        result = analyzer.compute_and_store(pid)
+        return {"success": True, **result}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.get("/v33/overview")
 async def v33_overview(request: Request, profile: str = ""):
     """Get SLM 3.3 feature overview -- all new capabilities at a glance."""

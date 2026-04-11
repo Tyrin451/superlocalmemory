@@ -155,3 +155,6 @@ test-results/
 .coverage
 65%.
 70%
+.gitnexus/
+.claude/skills/generated/
+graphify-out/

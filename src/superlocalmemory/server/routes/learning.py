@@ -25,17 +25,25 @@ LEARNING_DB = MEMORY_DIR / "learning.db"
 
 # Feature detection
 LEARNING_AVAILABLE = False
+BEHAVIORAL_AVAILABLE = False
 try:
     from superlocalmemory.learning.feedback import FeedbackCollector
     from superlocalmemory.learning.engagement import EngagementTracker
     from superlocalmemory.learning.ranker import AdaptiveRanker
     LEARNING_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("V3 learning primary import failed: %s", e)
     try:
         from superlocalmemory.learning.adaptive import AdaptiveLearner
         LEARNING_AVAILABLE = True
-    except ImportError:
-        logger.info("V3 learning system not available")
+    except ImportError as e2:
+        logger.warning("V3 learning fallback import failed: %s", e2)
+
+try:
+    from superlocalmemory.learning.behavioral import BehavioralPatternStore
+    BEHAVIORAL_AVAILABLE = True
+except ImportError as e:
+    logger.warning("V3 behavioral import failed: %s", e)
 
 # Lazy singletons
 _feedback: FeedbackCollector | None = None
@@ -86,7 +94,7 @@ async def learning_status():
             from superlocalmemory.learning.feedback import FeedbackCollector
             from pathlib import Path
             import sqlite3 as _sqlite3
-            learning_db = Path.home() / ".superlocalmemory" / "learning.db"
+            learning_db = LEARNING_DB
             if learning_db.exists():
                 collector = FeedbackCollector(learning_db)
                 signal_count = collector.get_feedback_count(active_profile)
@@ -149,7 +157,7 @@ async def learning_status():
         try:
             from superlocalmemory.learning.behavioral import BehavioralPatternStore
             from pathlib import Path
-            learning_db = Path.home() / ".superlocalmemory" / "learning.db"
+            learning_db = LEARNING_DB
             if learning_db.exists():
                 store = BehavioralPatternStore(str(learning_db))
                 all_patterns = store.get_patterns(profile_id=active_profile)
@@ -179,9 +187,11 @@ async def learning_status():
             else:
                 result["tech_preferences"] = []
                 result["workflow_patterns"] = []
-        except Exception:
+        except Exception as exc:
+            logger.error("Error fetching behavioral patterns: %s", exc, exc_info=True)
             result["tech_preferences"] = []
             result["workflow_patterns"] = []
+            result["pattern_error"] = str(exc)
         result["source_scores"] = {}
 
     except Exception as e:
@@ -308,6 +318,96 @@ async def feedback_stats():
     except Exception as e:
         logger.error("Error getting feedback stats: %s", e)
         return {"total_signals": 0, "ranking_phase": "baseline", "progress": 0, "error": str(e)}
+
+
+# ============================================================================
+# PATTERNS ENDPOINT (v3.4.1 — CRITICAL FIX: frontend calls /api/patterns)
+# ============================================================================
+
+@router.get("/api/patterns")
+async def get_patterns():
+    """Get learned behavioral patterns for the Patterns dashboard tab.
+
+    v3.4.1: This endpoint was MISSING — patterns.js calls /api/patterns
+    but no backend route existed. The frontend always showed 'No patterns'.
+    Now queries BehavioralPatternStore + learning signals.
+    """
+    active_profile = get_active_profile()
+
+    patterns: dict = {
+        "preference": [],
+        "style": [],
+        "terminology": [],
+        "workflow": [],
+    }
+    result: dict = {
+        "available": BEHAVIORAL_AVAILABLE or LEARNING_AVAILABLE,
+        "patterns": patterns,
+        "signal_stats": {},
+    }
+
+    # Behavioral patterns from BehavioralPatternStore
+    if BEHAVIORAL_AVAILABLE:
+        try:
+            store = BehavioralPatternStore(str(LEARNING_DB))
+            all_patterns = store.get_patterns(profile_id=active_profile)
+            for p in all_patterns:
+                ptype = p.get("pattern_type", "")
+                entry = {
+                    "key": p.get("pattern_key", ""),
+                    "value": p.get("metadata", {}).get("value", ""),
+                    "confidence": round(float(p.get("confidence", 0)), 3),
+                    "evidence_count": p.get("evidence_count", 0),
+                    "created_at": p.get("created_at", ""),
+                    "updated_at": p.get("updated_at", ""),
+                }
+                if ptype == "tech_preference":
+                    patterns["preference"].append(entry)
+                elif ptype == "style":
+                    patterns["style"].append(entry)
+                elif ptype == "terminology":
+                    patterns["terminology"].append(entry)
+                elif ptype in ("temporal", "interest", "workflow"):
+                    patterns["workflow"].append(entry)
+                else:
+                    patterns["preference"].append(entry)
+        except Exception as exc:
+            logger.error("Error loading patterns from behavioral store: %s", exc)
+            result["pattern_error"] = str(exc)
+
+    # Learning signal stats (feedback count, co-retrieval, channel credits)
+    try:
+        from superlocalmemory.learning.signals import LearningSignals
+        signals = LearningSignals(str(LEARNING_DB))
+        result["signal_stats"] = signals.get_signal_stats(active_profile)
+    except Exception as exc:
+        logger.debug("Signal stats unavailable: %s", exc)
+
+    # Graph intelligence contribution to learning (v3.4.1)
+    try:
+        import sqlite3 as _sqlite3
+        from superlocalmemory.server.routes.helpers import DB_PATH
+        if DB_PATH.exists():
+            conn = _sqlite3.connect(str(DB_PATH))
+            conn.row_factory = _sqlite3.Row
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt, COUNT(DISTINCT community_id) AS communities, "
+                "ROUND(AVG(pagerank_score), 4) AS avg_pagerank "
+                "FROM fact_importance WHERE profile_id = ?",
+                (active_profile,),
+            ).fetchone()
+            if row:
+                d = dict(row)
+                result["graph_intelligence"] = {
+                    "facts_analyzed": d.get("cnt", 0),
+                    "communities_detected": d.get("communities", 0),
+                    "avg_pagerank": float(d.get("avg_pagerank", 0) or 0),
+                }
+            conn.close()
+    except Exception:
+        pass
+
+    return result
 
 
 @router.post("/api/learning/backup")

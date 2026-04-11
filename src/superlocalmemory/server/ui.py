@@ -152,6 +152,14 @@ def create_app() -> FastAPI:
     from superlocalmemory.server.routes.v3_api import router as v3_router
     application.include_router(v3_router)
 
+    # v3.4.1: Chat SSE + Insights + Timeline endpoints
+    for _module_name_v341 in ("chat",):
+        try:
+            _mod_v341 = __import__(f"superlocalmemory.server.routes.{_module_name_v341}", fromlist=["router"])
+            application.include_router(_mod_v341.router)
+        except (ImportError, Exception) as _exc:
+            logger.warning("Optional router %s failed: %s", _module_name_v341, _exc)
+
     # Graceful optional routers
     for _module_name in ("learning", "lifecycle", "behavioral", "compliance"):
         try:

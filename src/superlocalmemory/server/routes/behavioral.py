@@ -25,8 +25,8 @@ try:
     from superlocalmemory.learning.behavioral import BehavioralPatternStore
     from superlocalmemory.learning.outcomes import OutcomeTracker
     BEHAVIORAL_AVAILABLE = True
-except ImportError:
-    logger.info("V3 behavioral engine not available")
+except ImportError as e:
+    logger.warning("V3 behavioral engine import failed: %s", e)
 
 
 @router.get("/api/behavioral/status")
@@ -66,9 +66,13 @@ async def behavioral_status():
         try:
             store = BehavioralPatternStore(db_path)
             patterns = store.get_patterns(profile_id=profile)
-            cross_project_transfers = 0
+            # Count patterns spanning multiple projects
+            cross_project_transfers = len([
+                p for p in patterns
+                if isinstance(p, dict) and p.get("project_count", 1) > 1
+            ])
         except Exception as exc:
-            logger.debug("pattern store: %s", exc)
+            logger.warning("pattern store error: %s", exc)
 
         return {
             "available": True,

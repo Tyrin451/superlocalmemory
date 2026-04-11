@@ -46,16 +46,20 @@ def _fetch_graph_data(
 ) -> tuple[list, list, list]:
     """Fetch graph nodes, links, clusters from V3 or V2 schema."""
     if use_v3:
-        # Recency-first: get the most recent nodes, then find their edges
+        # Recency-first: get the most recent nodes, then find their edges.
+        # LEFT JOIN fact_importance for graph metrics (v3.4.1 — additive only).
         cursor.execute("""
-            SELECT fact_id as id, content, fact_type as category,
-                   confidence as importance, session_id as project_name,
-                   created_at
-            FROM atomic_facts
-            WHERE profile_id = ? AND confidence >= ?
-            ORDER BY created_at DESC
+            SELECT af.fact_id as id, af.content, af.fact_type as category,
+                   af.confidence as importance, af.session_id as project_name,
+                   af.created_at,
+                   fi.pagerank_score, fi.community_id, fi.degree_centrality
+            FROM atomic_facts af
+            LEFT JOIN fact_importance fi
+                ON af.fact_id = fi.fact_id AND fi.profile_id = ?
+            WHERE af.profile_id = ? AND af.confidence >= ?
+            ORDER BY af.created_at DESC
             LIMIT ?
-        """, (profile, min_importance / 10.0, max_nodes))
+        """, (profile, profile, min_importance / 10.0, max_nodes))
         nodes = cursor.fetchall()
 
         node_ids = {n['id'] for n in nodes}
@@ -80,6 +84,13 @@ def _fetch_graph_data(
         for n in nodes:
             n['entities'] = []
             n['content_preview'] = _preview(n.get('content'))
+            # v3.4.1: Default graph metrics when fact_importance has no data
+            if n.get('pagerank_score') is None:
+                n['pagerank_score'] = 0.0
+            if n.get('community_id') is None:
+                n['community_id'] = 0
+            if n.get('degree_centrality') is None:
+                n['degree_centrality'] = 0.0
 
         # Filter edges to only those between displayed nodes
         node_ids = {n['id'] for n in nodes}
@@ -290,7 +301,7 @@ async def get_memories(
 @router.get("/api/graph")
 async def get_graph(
     request: Request,
-    max_nodes: int = Query(100, ge=10, le=500),
+    max_nodes: int = Query(100, ge=10, le=10000),
     min_importance: int = Query(1, ge=1, le=10),
 ):
     """Get knowledge graph data for D3.js force-directed visualization."""

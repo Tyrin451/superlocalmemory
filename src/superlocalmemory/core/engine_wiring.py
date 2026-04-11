@@ -364,7 +364,11 @@ def _init_spreading_activation(
             SpreadingActivation,
             SpreadingActivationConfig,
         )
-        sa_config = SpreadingActivationConfig(enabled=True)
+        sa_config = SpreadingActivationConfig(
+            enabled=True,
+            use_pagerank_bias=True,      # v3.4.1: PageRank-weighted propagation
+            community_boost=0.15,        # v3.4.1: 15% boost for same-community nodes
+        )
         return SpreadingActivation(
             db=db, vector_store=vector_store, config=sa_config,
         )
