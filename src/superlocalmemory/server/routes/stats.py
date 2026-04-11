@@ -64,14 +64,26 @@ async def get_stats():
                 pass
 
             total_clusters = 0
+            # v3.4.1: Use community_id from fact_importance (graph intelligence)
             try:
                 cursor.execute(
-                    "SELECT COUNT(DISTINCT scene_id) as total FROM scenes WHERE profile_id = ?",
+                    "SELECT COUNT(DISTINCT community_id) as total FROM fact_importance "
+                    "WHERE profile_id = ? AND community_id IS NOT NULL",
                     (active_profile,),
                 )
                 total_clusters = cursor.fetchone()['total']
             except Exception:
                 pass
+            # Fallback: V2 scenes table
+            if total_clusters == 0:
+                try:
+                    cursor.execute(
+                        "SELECT COUNT(DISTINCT scene_id) as total FROM scenes WHERE profile_id = ?",
+                        (active_profile,),
+                    )
+                    total_clusters = cursor.fetchone()['total']
+                except Exception:
+                    pass
             # Fallback: V2-migrated clusters stored as cluster_id on memories
             if total_clusters == 0:
                 try:
