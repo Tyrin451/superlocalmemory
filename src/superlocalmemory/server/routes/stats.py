@@ -311,11 +311,21 @@ async def get_patterns():
                 from superlocalmemory.learning.behavioral import BehavioralPatternStore
                 store = BehavioralPatternStore(str(MEMORY_DIR / "learning.db"))
                 raw = store.get_patterns(profile_id=active_profile)
+                # v3.4.1: Map pattern_type to frontend-expected keys
+                type_map = {
+                    "tech_preference": "preference",
+                    "style": "style",
+                    "terminology": "terminology",
+                    "temporal": "workflow",
+                    "interest": "workflow",
+                    "workflow": "workflow",
+                }
                 grouped = defaultdict(list)
                 for p in raw:
                     meta = p.get("metadata", {})
-                    grouped[p["pattern_type"]].append({
-                        "pattern_type": p["pattern_type"],
+                    frontend_key = type_map.get(p.get("pattern_type", ""), "preference")
+                    grouped[frontend_key].append({
+                        "pattern_type": p.get("pattern_type", ""),
                         "key": meta.get("key", p.get("pattern_key", "")),
                         "value": meta.get("value", p.get("pattern_key", "")),
                         "confidence": p.get("confidence", 0),

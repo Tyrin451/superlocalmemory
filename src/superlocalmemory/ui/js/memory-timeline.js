@@ -59,7 +59,7 @@ function fetchTimelineData(range, groupBy) {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             memoryTimelineState.events = data.events || [];
-            renderTimeline(memoryTimelineState.events, container, groupBy);
+            renderMemoryTimeline(memoryTimelineState.events, container, groupBy);
         })
         .catch(function(e) {
             container.innerHTML = '';
@@ -74,7 +74,7 @@ function fetchTimelineData(range, groupBy) {
 // D3 RENDERING
 // ============================================================================
 
-function renderTimeline(events, container, groupBy) {
+function renderMemoryTimeline(events, container, groupBy) {
     container.innerHTML = '';
     if (!events || events.length === 0) {
         var msg = document.createElement('div');

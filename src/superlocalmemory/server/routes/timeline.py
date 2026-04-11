@@ -43,7 +43,7 @@ async def get_timeline(
     limit: int = Query(default=1000, ge=1, le=2000),
     offset: int = Query(default=0, ge=0),
     profile: str = "",
-) -> dict[str, Any] | JSONResponse:
+):
     """Get unified timeline events from all memory sources."""
     modifier = _parse_range(range)
     if modifier is None:

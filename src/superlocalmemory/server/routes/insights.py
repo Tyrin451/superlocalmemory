@@ -334,7 +334,7 @@ async def insight_action(
     profile: str = "",
     limit: int = Query(default=50, ge=1, le=200),
     days: int = Query(default=7, ge=1, le=90),
-) -> dict[str, Any] | JSONResponse:
+):
     """Run a quick insight action against the memory database."""
     handler = ALLOWED_ACTIONS.get(action_name)
     if not handler:
