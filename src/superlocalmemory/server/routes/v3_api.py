@@ -1543,12 +1543,19 @@ async def process_health(request: Request):
 
         # Memory usage of current process (approximate)
         memory_mb = 0.0
-        try:
-            import resource
-            usage = resource.getrusage(resource.RUSAGE_SELF)
-            memory_mb = round(usage.ru_maxrss / (1024 * 1024), 1)
-        except Exception:
-            pass
+        if sys.platform != "win32":
+            try:
+                import resource
+                usage = resource.getrusage(resource.RUSAGE_SELF)
+                memory_mb = round(usage.ru_maxrss / (1024 * 1024), 1)
+            except Exception:
+                pass
+        else:
+            try:
+                import psutil
+                memory_mb = round(psutil.Process().memory_info().rss / (1024 * 1024), 1)
+            except Exception:
+                pass
 
         return {
             "processes": processes,
