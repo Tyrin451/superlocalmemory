@@ -1100,25 +1100,28 @@ def cmd_warmup(_args: Namespace) -> None:
     print("SuperLocalMemory V3 — Embedding Model Warmup")
     print("=" * 50)
     print(f"  Python: {sys.executable}")
-    print(f"  Model:  nomic-ai/nomic-embed-text-v1.5 (~500MB)")
-    print()
-
-    # Increase timeout for first-time download
-    original_timeout = _emb_mod._SUBPROCESS_RESPONSE_TIMEOUT
-    _emb_mod._SUBPROCESS_RESPONSE_TIMEOUT = 180  # 3 min for cold start
-
+    
     try:
-        from superlocalmemory.core.config import EmbeddingConfig
+        from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.core.embeddings import EmbeddingService
+        
+        # Load user config to respect custom models (e.g. BGE-M3)
+        full_cfg = SLMConfig.load()
+        config = full_cfg.embedding
+        
+        print(f"  Model:  {config.model_name} ({config.dimension}-dim)")
+        print()
 
-        config = EmbeddingConfig()
+        # Increase timeout for first-time download
+        original_timeout = _emb_mod._SUBPROCESS_RESPONSE_TIMEOUT
+        _emb_mod._SUBPROCESS_RESPONSE_TIMEOUT = 180  # 3 min for cold start
 
         print("Step 1/3: Spawning embedding worker subprocess...")
         svc = EmbeddingService(config)
 
         if not svc.is_available:
             print("\n[FAIL] Embedding service not available.")
-            _warmup_diagnose()
+            _warmup_diagnose(config)
             return
 
         print("Step 2/3: Loading model (may download ~500MB on first run)...")
@@ -1130,27 +1133,31 @@ def cmd_warmup(_args: Namespace) -> None:
             print("Semantic search is fully operational.")
         else:
             print("\n[FAIL] Model loaded but embedding verification failed.")
-            _warmup_diagnose()
+            _warmup_diagnose(config)
 
     except ImportError as exc:
         print(f"\n[FAIL] Missing dependency: {exc}")
         print("Fix: pip install sentence-transformers einops torch")
     except Exception as exc:
         print(f"\n[FAIL] Warmup failed: {exc}")
-        _warmup_diagnose()
+        _warmup_diagnose(config if 'config' in locals() else None)
     finally:
         _emb_mod._SUBPROCESS_RESPONSE_TIMEOUT = original_timeout
 
 
-def _warmup_diagnose() -> None:
+def _warmup_diagnose(config: EmbeddingConfig | None = None) -> None:
     """Diagnostic helper when warmup fails."""
     print("\nDiagnosing...")
     print(f"  Python executable: {sys.executable}")
+    
+    model_name = config.model_name if config else "nomic-ai/nomic-embed-text-v1.5"
+    
     try:
         from sentence_transformers import SentenceTransformer
-        print("  sentence-transformers: importable")
+        print(f"  sentence-transformers: importable")
+        print(f"  Attempting direct load of: {model_name}")
         m = SentenceTransformer(
-            "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True, device="cpu",
+            model_name, trust_remote_code=True, device="cpu",
         )
         v = m.encode(["test"], normalize_embeddings=True)
         print(f"  Direct embed: OK (dim={v.shape[1]})")

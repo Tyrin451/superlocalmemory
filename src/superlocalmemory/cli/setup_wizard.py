@@ -188,8 +188,9 @@ def _verify_installation() -> bool:
 
     script = (
         "from superlocalmemory.core.embeddings import EmbeddingService; "
-        "from superlocalmemory.core.config import EmbeddingConfig; "
-        "cfg = EmbeddingConfig(); "
+        "from superlocalmemory.core.config import SLMConfig; "
+        "full_cfg = SLMConfig.load(); "
+        "cfg = full_cfg.embedding; "
         "svc = EmbeddingService(cfg); "
         "vec = svc.embed('SuperLocalMemory setup verification test'); "
         "print(f'OK dim={len(vec)}' if vec else 'FAIL'); "

@@ -605,6 +605,22 @@ class SLMConfig:
         )
         config.active_profile = data.get("active_profile", "default")
 
+        # V3.3: Override embedding defaults if explicitly set in JSON
+        if "model_name" in emb_data or "dimension" in emb_data:
+            # We must create a new EmbeddingConfig because it's frozen
+            updated_emb = EmbeddingConfig(
+                model_name=emb_data.get("model_name", config.embedding.model_name),
+                dimension=int(emb_data.get("dimension", config.embedding.dimension)),
+                provider=config.embedding.provider,
+                ollama_model=config.embedding.ollama_model,
+                ollama_base_url=config.embedding.ollama_base_url,
+                api_endpoint=config.embedding.api_endpoint,
+                api_key=config.embedding.api_key,
+                api_version=config.embedding.api_version,
+                deployment_name=config.embedding.deployment_name,
+            )
+            object.__setattr__(config, "embedding", updated_emb)
+
         # V3.3 config fields (additive — defaults work if missing from JSON)
         fg = data.get("forgetting", {})
         if fg:
