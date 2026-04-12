@@ -57,17 +57,37 @@ def _start_parent_watchdog() -> None:
 
     V3.3.7: Added after incident where ~30 orphaned workers consumed 33 GB.
     """
-    parent_pid = os.getppid()
+    try:
+        parent_pid = os.getppid()
+    except AttributeError:
+        return
+    if parent_pid <= 1:
+        return
 
     def _watch() -> None:
         import time
+        import errno
         while True:
             time.sleep(5)
             try:
-                os.kill(parent_pid, 0)  # Check if parent is alive (signal 0)
-            except OSError:
-                # Parent is dead — self-terminate
-                os._exit(0)
+                if sys.platform == "win32":
+                    try:
+                        import psutil
+                        if not psutil.pid_exists(parent_pid):
+                            os._exit(0)
+                    except ImportError:
+                        try:
+                            os.kill(parent_pid, 0)
+                        except OSError as e:
+                            if e.errno == errno.ESRCH:
+                                os._exit(0)
+                else:
+                    os.kill(parent_pid, 0)
+            except OSError as e:
+                if e.errno == errno.ESRCH:
+                    os._exit(0)
+            except Exception:
+                pass
 
     t = threading.Thread(target=_watch, daemon=True, name="parent-watchdog")
     t.start()
@@ -181,8 +201,17 @@ def _worker_main() -> None:
                 _respond({"ok": False, "error": str(exc)})
 
             # V3.3.16: RSS watchdog — same as embedding_worker
-            import resource
-            rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
+            rss_mb = 0.0
+            if sys.platform != "win32":
+                import resource
+                rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
+            else:
+                try:
+                    import psutil
+                    rss_mb = psutil.Process().memory_info().rss / 1024 / 1024
+                except ImportError:
+                    pass  # skip RSS check if psutil not available
+
             if rss_mb > 2500:
                 sys.exit(0)
 

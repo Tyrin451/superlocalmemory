@@ -55,7 +55,10 @@ def _start_parent_watchdog() -> None:
     V3.3.7: Added after incident where orphaned workers consumed 33 GB.
     V3.3.22: Enabled for Windows and added errno check.
     """
-    parent_pid = os.getppid()
+    try:
+        parent_pid = os.getppid()
+    except AttributeError:
+        return
     if parent_pid <= 1:
         return
 
@@ -65,15 +68,30 @@ def _start_parent_watchdog() -> None:
         while True:
             time.sleep(5)
             try:
-                # os.kill(pid, 0) checks if process exists. Works on Unix and Windows.
-                os.kill(parent_pid, 0)
+                if sys.platform == "win32":
+                    # On Windows, os.kill(pid, 0) raises PermissionError if process exists
+                    # but we don't have certain rights. psutil is more reliable.
+                    try:
+                        import psutil
+                        if not psutil.pid_exists(parent_pid):
+                            os._exit(0)
+                    except ImportError:
+                        # Fallback to os.kill if psutil is not available
+                        try:
+                            os.kill(parent_pid, 0)
+                        except OSError as e:
+                            if e.errno == errno.ESRCH:
+                                os._exit(0)
+                            # On Windows, EACCES/EPERM means it EXISTS but we can't kill it.
+                else:
+                    os.kill(parent_pid, 0)
             except OSError as e:
                 # ESRCH: No such process. EPERM: Access denied (process exists).
                 if e.errno == errno.ESRCH:
                     os._exit(0)
             except Exception:
                 # Safety fallback for any other OS-specific issues
-                os._exit(0)
+                pass
 
     t = threading.Thread(target=_watch, daemon=True, name="parent-watchdog")
     t.start()

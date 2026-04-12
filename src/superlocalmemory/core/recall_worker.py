@@ -21,6 +21,7 @@ import os
 import signal
 import sys
 import threading
+import logging
 
 # Force CPU BEFORE any torch import
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
@@ -29,6 +30,15 @@ os.environ["PYTORCH_MPS_MEM_LIMIT"] = "0"
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["TORCH_DEVICE"] = "cpu"
+
+# V3.3.30: Configure logging to stderr immediately to avoid stdout corruption.
+# If any component logs to stdout, it breaks the JSON protocol.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stderr,
+)
+logger = logging.getLogger("recall_worker")
 
 # SIGTERM bridge: Docker/systemd send SIGTERM to stop processes.
 # Without this, the worker ignores SIGTERM and becomes a zombie.
@@ -44,16 +54,37 @@ def _start_parent_watchdog() -> None:
 
     V3.3.7: Added after incident where orphaned workers consumed 33 GB.
     """
-    parent_pid = os.getppid()
+    try:
+        parent_pid = os.getppid()
+    except AttributeError:
+        return # getppid not available on some platforms
+    if parent_pid <= 1:
+        return
 
     def _watch() -> None:
         import time
+        import errno
         while True:
             time.sleep(5)
             try:
-                os.kill(parent_pid, 0)
-            except OSError:
-                os._exit(0)
+                if sys.platform == "win32":
+                    try:
+                        import psutil
+                        if not psutil.pid_exists(parent_pid):
+                            os._exit(0)
+                    except ImportError:
+                        try:
+                            os.kill(parent_pid, 0)
+                        except OSError as e:
+                            if e.errno == errno.ESRCH:
+                                os._exit(0)
+                else:
+                    os.kill(parent_pid, 0)
+            except OSError as e:
+                if e.errno == errno.ESRCH:
+                    os._exit(0)
+            except Exception:
+                pass
 
     t = threading.Thread(target=_watch, daemon=True, name="parent-watchdog")
     t.start()
@@ -321,10 +352,19 @@ def _worker_main() -> None:
         except Exception as exc:
             _respond({"ok": False, "error": str(exc)})
 
-        # V3.3.16: RSS watchdog — self-terminate if memory exceeds 1.5GB.
+        # V3.3.16: RSS watchdog — self-terminate if memory exceeds limit.
         # Parent auto-respawns a fresh worker on next request.
-        import resource
-        rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
+        rss_mb = 0.0
+        if sys.platform != "win32":
+            import resource
+            rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
+        else:
+            try:
+                import psutil
+                rss_mb = psutil.Process().memory_info().rss / 1024 / 1024
+            except ImportError:
+                pass  # skip RSS check if psutil not available
+
         if rss_mb > 2500:
             sys.exit(0)
 
