@@ -144,9 +144,20 @@ class ConsolidationEngine:
                     from superlocalmemory.parameterization.soft_prompt_generator import SoftPromptGenerator
                     from superlocalmemory.parameterization.prompt_injector import PromptInjector
                     from superlocalmemory.parameterization.prompt_lifecycle import PromptLifecycleManager
-                    from superlocalmemory.parameterization.cross_project import CrossProjectAggregator
-                    from superlocalmemory.parameterization.workflow_miner import WorkflowMiner
                     from superlocalmemory.learning.behavioral import BehavioralPatternStore
+                    # cross_project and workflow_miner may not exist yet — stub them
+                    try:
+                        from superlocalmemory.parameterization.cross_project import CrossProjectAggregator
+                    except ImportError:
+                        class CrossProjectAggregator:
+                            def __init__(self, db): pass
+                            def aggregate(self, *a, **kw): return []
+                    try:
+                        from superlocalmemory.parameterization.workflow_miner import WorkflowMiner
+                    except ImportError:
+                        class WorkflowMiner:
+                            def __init__(self, db): pass
+                            def mine(self, *a, **kw): return []
                     from superlocalmemory.hooks.auto_parameterize import AutoParameterizeHook
                     from superlocalmemory.core.config import ParameterizationConfig
                     from pathlib import Path as _Path
