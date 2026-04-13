@@ -226,11 +226,15 @@ async def get_soft_prompts():
         conn = _sqlite3.connect(str(MEMORY_DIR / "memory.db"))
         conn.row_factory = _sqlite3.Row
         rows = conn.execute(
-            "SELECT * FROM soft_prompt_templates WHERE active = 1 "
-            "ORDER BY category"
+            "SELECT prompt_id, category, content, confidence, effectiveness, "
+            "token_count, active, version, created_at "
+            "FROM soft_prompt_templates WHERE active = 1 ORDER BY category"
         ).fetchall()
         conn.close()
-        return {"prompts": [dict(r) for r in rows], "count": len(rows)}
+        return {"prompts": [dict(zip(
+            ["prompt_id", "category", "content", "confidence", "effectiveness",
+             "token_count", "active", "version", "created_at"], r
+        )) for r in rows], "count": len(rows)}
     except Exception as e:
         logger.debug("get_soft_prompts error: %s", e)
         return {"prompts": [], "count": 0, "error": str(e)}

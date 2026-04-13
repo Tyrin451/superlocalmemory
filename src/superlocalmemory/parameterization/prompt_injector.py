@@ -186,7 +186,8 @@ class PromptInjector:
             )
             max_version = 0
             if version_rows:
-                max_version = version_rows[0].get("max_version", 0) or 0
+                row = version_rows[0]
+                max_version = (dict(row) if hasattr(row, "keys") else {"max_version": row[0]}).get("max_version", 0) or 0
             new_version = max_version + 1
 
             # Insert new prompt

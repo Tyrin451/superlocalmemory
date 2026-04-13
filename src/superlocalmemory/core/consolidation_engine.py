@@ -151,7 +151,7 @@ class ConsolidationEngine:
                     except ImportError:
                         class CrossProjectAggregator:
                             def __init__(self, db): pass
-                            def aggregate(self, *a, **kw): return []
+                            def get_preferences(self, *a, **kw): return {}
                     try:
                         from superlocalmemory.parameterization.workflow_miner import WorkflowMiner
                     except ImportError:
@@ -169,7 +169,7 @@ class ConsolidationEngine:
                     wf_miner = WorkflowMiner(self._db)
                     extractor = PatternExtractor(self._db, beh_store, cross_proj, wf_miner, p_config)
                     generator = SoftPromptGenerator(p_config)
-                    injector = PromptInjector(self._db)
+                    injector = PromptInjector(self._db, generator, p_config)
                     lifecycle = PromptLifecycleManager(self._db, p_config)
                     hook = AutoParameterizeHook(extractor, generator, injector, lifecycle, p_config)
                     sp_result = hook.on_consolidation_complete(profile_id)
