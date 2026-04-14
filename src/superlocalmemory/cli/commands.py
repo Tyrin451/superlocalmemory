@@ -58,6 +58,8 @@ def dispatch(args: Namespace) -> None:
         "reap": cmd_reap,
         # V3.3.21 daemon
         "serve": cmd_serve,
+        # V3.4.9 nuclear restart
+        "restart": cmd_restart,
         # V3.4.3 ingestion adapters
         "adapters": cmd_adapters,
         # V3.4.8 external observation ingestion
@@ -144,6 +146,193 @@ def cmd_serve(args: Namespace) -> None:
 
 
 # -- Ingestion Adapters (V3.4.3) ------------------------------------------
+
+
+def cmd_restart(args: Namespace) -> None:
+    """Nuclear restart: kill ALL orphans, clean state, start fresh, verify health.
+
+    5-step pipeline:
+      1. Kill ALL SLM processes (daemon + workers + orphans)
+      2. Clean stale PID/port/lock files
+      3. Start fresh daemon
+      4. Wait for engine warmup + verify health
+      5. Optionally open dashboard
+    """
+    import os
+    import time
+    from pathlib import Path
+
+    use_json = getattr(args, "json", False)
+    open_dashboard = getattr(args, "dashboard", False)
+    slm_dir = Path.home() / ".superlocalmemory"
+    steps: list[dict] = []
+
+    def _log(step: int, name: str, status: str, detail: str = ""):
+        entry = {"step": step, "name": name, "status": status, "detail": detail}
+        steps.append(entry)
+        if not use_json:
+            icon = {"ok": "+", "warn": "!", "fail": "x"}.get(status, " ")
+            print(f"  [{icon}] Step {step}: {name}" + (f" — {detail}" if detail else ""))
+
+    if not use_json:
+        print()
+        print("  SLM Full System Restart")
+        print("  " + "=" * 40)
+        print()
+
+    # Step 1: Kill ALL SLM processes
+    killed = 0
+    try:
+        import psutil
+        my_pid = os.getpid()
+        targets = [
+            "superlocalmemory.server.unified_daemon",
+            "superlocalmemory.core.embedding_worker",
+            "superlocalmemory.core.recall_worker",
+            "superlocalmemory.core.reranker_worker",
+            "superlocalmemory.cli.daemon",
+        ]
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                if proc.pid == my_pid:
+                    continue
+                cmdline = " ".join(proc.info.get("cmdline") or [])
+                if any(t in cmdline for t in targets):
+                    for child in proc.children(recursive=True):
+                        try:
+                            child.kill()
+                            killed += 1
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                    proc.kill()
+                    killed += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except ImportError:
+        # Fallback: pkill
+        import subprocess as _sp
+        for pattern in [
+            "superlocalmemory.server.unified_daemon",
+            "superlocalmemory.core.embedding_worker",
+            "superlocalmemory.core.recall_worker",
+            "superlocalmemory.core.reranker_worker",
+        ]:
+            try:
+                r = _sp.run(["pkill", "-9", "-f", pattern], capture_output=True, timeout=5)
+                if r.returncode == 0:
+                    killed += 1
+            except Exception:
+                pass
+
+    _log(1, "Kill all SLM processes", "ok", f"{killed} processes killed")
+    time.sleep(3)
+
+    # Step 2: Clean stale files
+    cleaned = []
+    for fname in ("daemon.pid", "daemon.port", "daemon.lock"):
+        fpath = slm_dir / fname
+        if fpath.exists():
+            fpath.unlink(missing_ok=True)
+            cleaned.append(fname)
+    _log(2, "Clean stale state files", "ok",
+         f"removed: {', '.join(cleaned)}" if cleaned else "already clean")
+
+    # Step 3: Start fresh daemon
+    time.sleep(1)
+    from superlocalmemory.cli.daemon import ensure_daemon
+    started = ensure_daemon()
+    _log(3, "Start fresh daemon", "ok" if started else "fail",
+         "daemon started" if started else "failed to start — check slm doctor")
+
+    if not started:
+        if use_json:
+            from superlocalmemory.cli.json_output import json_print
+            json_print("restart", data={"steps": steps, "success": False},
+                       next_actions=[{"command": "slm doctor", "description": "Diagnose issues"}])
+        else:
+            print("\n  Restart FAILED at step 3. Run: slm doctor")
+        return
+
+    # Step 4: Wait for warmup + verify health
+    if not use_json:
+        print("  [ ] Step 4: Waiting for engine warmup (up to 30s)...", end="", flush=True)
+
+    health = None
+    engine_ok = False
+    for attempt in range(15):
+        time.sleep(2)
+        try:
+            from superlocalmemory.cli.daemon import daemon_request
+            health = daemon_request("GET", "/health")
+            if health and health.get("engine") == "initialized":
+                engine_ok = True
+                break
+        except Exception:
+            pass
+
+    if not use_json:
+        print("\r", end="")  # Clear the waiting line
+
+    if engine_ok:
+        version = health.get("version", "?")
+        pid = health.get("pid", "?")
+        _log(4, "Engine health verified", "ok", f"v{version}, PID {pid}, engine=initialized")
+    else:
+        engine_state = health.get("engine", "unknown") if health else "unreachable"
+        _log(4, "Engine health check", "warn",
+             f"engine={engine_state} — may still be warming up. Try again in 30s.")
+
+    # Step 5: Database integrity check
+    try:
+        import sqlite3
+        db_path = slm_dir / "memory.db"
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path))
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            fact_count = conn.execute("SELECT COUNT(*) FROM atomic_facts").fetchone()[0]
+            entity_count = conn.execute("SELECT COUNT(*) FROM canonical_entities").fetchone()[0]
+            conn.close()
+            _log(5, "Database integrity", "ok" if integrity == "ok" else "fail",
+                 f"integrity={integrity}, {fact_count} facts, {entity_count} entities")
+        else:
+            _log(5, "Database check", "warn", "no database yet — will create on first use")
+    except Exception as exc:
+        _log(5, "Database check", "warn", str(exc))
+
+    # Step 6 (optional): Open dashboard
+    if open_dashboard:
+        try:
+            import webbrowser
+            from superlocalmemory.cli.daemon import _get_port
+            port = _get_port()
+            url = f"http://localhost:{port}"
+            webbrowser.open(url)
+            _log(6, "Dashboard opened", "ok", url)
+        except Exception as exc:
+            _log(6, "Dashboard open", "fail", str(exc))
+
+    # Summary
+    all_ok = all(s["status"] == "ok" for s in steps)
+
+    if use_json:
+        from superlocalmemory.cli.json_output import json_print
+        json_print("restart", data={
+            "steps": steps, "success": all_ok,
+            "processes_killed": killed,
+            "version": health.get("version") if health else None,
+        }, next_actions=[
+            {"command": "slm serve status", "description": "Check daemon status"},
+            {"command": "slm dashboard", "description": "Open dashboard"},
+        ])
+        return
+
+    print()
+    if all_ok:
+        print("  All systems operational.")
+    else:
+        warnings = [s for s in steps if s["status"] != "ok"]
+        print(f"  {len(warnings)} issue(s) — check details above.")
+    print()
 
 
 def cmd_ingest(args: Namespace) -> None:

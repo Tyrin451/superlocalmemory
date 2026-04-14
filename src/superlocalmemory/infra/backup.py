@@ -34,6 +34,26 @@ DEFAULT_INTERVAL_HOURS = 168   # 7 days
 DEFAULT_MAX_BACKUPS = 10
 MIN_INTERVAL_HOURS = 1
 
+# ---------------------------------------------------------------------------
+# SLM Managed Database Registry
+# ---------------------------------------------------------------------------
+# Every database that SLM creates and manages. The backup system backs up
+# ONLY these databases — nothing else. When a new SLM module creates a new
+# database file, add it here so it gets included in backups.
+#
+# Each user may have a different subset (e.g., some don't have code_graph.db
+# if they never used the code graph feature). The backup system checks which
+# ones exist and only backs up what's present.
+
+MANAGED_DATABASES: tuple[str, ...] = (
+    "memory.db",        # Core: facts, entities, graph, embeddings, sessions
+    "learning.db",      # Learning pipeline: signals, patterns, ranker
+    "audit_chain.db",   # Audit trail: compliance, provenance chain
+    "code_graph.db",    # Code knowledge graph: symbols, references
+    "pending.db",       # Pending operations queue
+    "audit.db",         # Legacy audit (pre-v3.4)
+)
+
 
 class BackupManager:
     """Automated backup manager for SuperLocalMemory V3.
@@ -169,8 +189,8 @@ class BackupManager:
             self._save_config()
             logger.info("Backup created: %s (%.1f MB)", backup_name, size_mb)
 
-            # Also backup learning.db if present
-            self._backup_learning_db(timestamp, suffix)
+            # v3.4.10: Backup ALL .db files in the SLM directory
+            self._backup_all_dbs(timestamp, suffix)
 
             self._enforce_retention()
             return backup_name
@@ -181,29 +201,52 @@ class BackupManager:
                 backup_path.unlink()
             return ""
 
-    def _backup_learning_db(self, timestamp: str, suffix: str) -> None:
-        """Best-effort backup of ``learning.db`` alongside the main DB."""
-        learning_db = self.db_path.parent / "learning.db"
-        if not learning_db.exists():
-            return
-        try:
-            name = f"learning-{timestamp}{suffix}.db"
-            path = self.backup_dir / name
-            src = sqlite3.connect(str(learning_db))
-            dst = sqlite3.connect(str(path))
+    def _backup_all_dbs(self, timestamp: str, suffix: str) -> None:
+        """Backup all SLM-managed databases alongside the main memory.db.
+
+        Uses the managed database registry — only backs up databases that
+        SLM knows about. Add new databases to MANAGED_DATABASES when new
+        modules create them.
+        """
+        slm_dir = self.db_path.parent
+        backed_up = 0
+        for db_name in MANAGED_DATABASES:
+            if db_name == "memory.db":
+                continue  # Already backed up by create_backup()
+            db_file = slm_dir / db_name
+            if not db_file.exists():
+                continue  # This user doesn't have this DB — skip
+
             try:
-                src.backup(dst)
-            finally:
-                dst.close()
-                src.close()
-            logger.info("Learning backup: %s (%.1f MB)", name, path.stat().st_size / (1024 * 1024))
-        except Exception as exc:
-            logger.warning("Learning DB backup failed (non-critical): %s", exc)
+                prefix = db_file.stem
+                name = f"{prefix}-{timestamp}{suffix}.db"
+                path = self.backup_dir / name
+                src = sqlite3.connect(str(db_file))
+                dst = sqlite3.connect(str(path))
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
+                    src.close()
+                backed_up += 1
+                logger.info(
+                    "Backup: %s (%.1f MB)", name,
+                    path.stat().st_size / (1024 * 1024),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "%s backup failed (non-critical): %s",
+                    db_name, exc,
+                )
+        if backed_up:
+            logger.info("Backed up %d companion databases", backed_up)
 
     def _enforce_retention(self) -> None:
         """Remove old backups exceeding the configured max."""
         max_backups = self.config.get("max_backups", DEFAULT_MAX_BACKUPS)
-        for pattern in ("memory-*.db", "learning-*.db"):
+        # Build patterns from the managed database registry
+        patterns = [f"{Path(db).stem}-*.db" for db in MANAGED_DATABASES]
+        for pattern in patterns:
             backups = sorted(
                 self.backup_dir.glob(pattern),
                 key=lambda f: f.stat().st_mtime,

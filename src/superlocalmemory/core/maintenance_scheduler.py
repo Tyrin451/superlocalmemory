@@ -75,7 +75,7 @@ class MaintenanceScheduler:
         self._timer.start()
 
     def _run(self) -> None:
-        """Execute maintenance and schedule next run."""
+        """Execute maintenance + auto-backup check, then schedule next run."""
         if not self._running:
             return
         try:
@@ -84,8 +84,29 @@ class MaintenanceScheduler:
             logger.info("Scheduled maintenance complete: %s", counts)
         except Exception as exc:
             logger.warning("Scheduled maintenance failed: %s", exc)
-        finally:
-            self._schedule_next()
+
+        # V3.4.10: Check if auto-backup is due
+        try:
+            from superlocalmemory.infra.backup import BackupManager
+            manager = BackupManager(db_path=self._db.db_path)
+            filename = manager.check_and_backup()
+            if filename:
+                logger.info("Auto-backup created: %s", filename)
+                self._sync_cloud_destinations(manager)
+        except Exception as exc:
+            logger.debug("Auto-backup check skipped: %s", exc)
+
+        self._schedule_next()
+
+    def _sync_cloud_destinations(self, manager: object) -> None:
+        """Push latest backup to configured cloud destinations."""
+        try:
+            from superlocalmemory.infra.cloud_backup import sync_all_destinations
+            sync_all_destinations(self._db.db_path)
+        except ImportError:
+            pass  # cloud_backup module not available yet
+        except Exception as exc:
+            logger.warning("Cloud sync failed (non-critical): %s", exc)
 
     def __del__(self) -> None:
         try:

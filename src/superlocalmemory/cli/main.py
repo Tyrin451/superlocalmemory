@@ -199,6 +199,17 @@ def main() -> None:
         help="start (default), stop, status, install (OS service), uninstall",
     )
 
+    # V3.4.9: Full system restart with health verification
+    restart_p = sub.add_parser(
+        "restart",
+        help="Nuclear restart: kill orphans, clean state, start fresh, verify health",
+    )
+    restart_p.add_argument(
+        "--dashboard", action="store_true",
+        help="Open dashboard after restart",
+    )
+    restart_p.add_argument("--json", action="store_true", help="Output structured JSON")
+
     # -- Profiles ------------------------------------------------------
     profile_p = sub.add_parser("profile", help="Profile management (list/switch/create)")
     profile_p.add_argument(

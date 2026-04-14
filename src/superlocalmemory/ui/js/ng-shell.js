@@ -44,6 +44,7 @@
         { id: 'health-pane', icon: 'bi-heart-pulse', text: 'Health Monitor', badge: 'NEW' },
         { id: 'ingestion-pane', icon: 'bi-cloud-download', text: 'Ingestion', badge: 'NEW' },
         { id: 'entities-pane', icon: 'bi-person-badge', text: 'Entity Explorer', badge: 'NEW' },
+        { id: 'skills-pane', icon: 'bi-lightning-charge', text: 'Skill Evolution', badge: 'NEW' },
         { id: 'mesh-pane', icon: 'bi-share', text: 'Mesh Peers', badge: 'NEW' }
       ]
     },
@@ -134,6 +135,35 @@
     var addProfileBtn = document.getElementById('add-profile-btn');
 
     footer.innerHTML =
+      // v3.4.10: Cloud Backup Account Widget
+      '<div id="ng-account-widget" style="margin-bottom:10px;padding:8px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);cursor:pointer;" onclick="document.querySelector(\'[data-target=settings]\')?.click()">' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span id="ng-account-avatar" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;overflow:hidden;">' +
+            '<i class="bi bi-cloud-slash" style="font-size:13px;opacity:0.4;"></i>' +
+          '</span>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div id="ng-account-name" style="font-size:12px;color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Not connected</div>' +
+            '<div id="ng-account-status" style="font-size:10px;color:#666;">No cloud backup</div>' +
+          '</div>' +
+          '<span id="ng-account-dot" style="width:7px;height:7px;border-radius:50%;background:#444;flex-shrink:0;" title="No cloud backup"></span>' +
+        '</div>' +
+        '<div id="ng-account-actions" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);">' +
+          '<div style="display:flex;gap:4px;">' +
+            '<button class="ng-btn" onclick="event.stopPropagation();connectGoogleDrive()" title="Connect Google Drive" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
+              '<i class="bi bi-google" style="color:#4285f4;"></i>' +
+            '</button>' +
+            '<button class="ng-btn" onclick="event.stopPropagation();connectGitHub()" title="Connect GitHub" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
+              '<i class="bi bi-github"></i>' +
+            '</button>' +
+            '<button class="ng-btn" onclick="event.stopPropagation();syncCloudNow()" title="Sync Now" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
+              '<i class="bi bi-cloud-upload" style="color:#00D4AA;"></i>' +
+            '</button>' +
+            '<button class="ng-btn" onclick="event.stopPropagation();exportBackup()" title="Export Backup" style="flex:1;justify-content:center;font-size:11px;padding:4px;">' +
+              '<i class="bi bi-download" style="color:#f39c12;"></i>' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
       '<div style="margin-bottom:8px">' +
         '<div class="ng-sidebar-section-label" style="padding:0 0 4px">Profile</div>' +
         '<div style="display:flex;gap:4px;align-items:center" id="ng-profile-container"></div>' +
@@ -358,6 +388,9 @@
         break;
       case 'entities-pane':
         if (typeof loadEntityExplorer === 'function') loadEntityExplorer();
+        break;
+      case 'skills-pane':
+        if (typeof loadSkillEvolution === 'function') loadSkillEvolution();
         break;
       case 'mesh-pane':
         if (typeof loadMeshPeers === 'function') loadMeshPeers();

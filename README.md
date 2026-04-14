@@ -378,6 +378,15 @@ Auto-capture hooks: `slm hooks install` + `slm observe` + `slm session-context`.
 - Auto-learned soft prompts injected into agent context
 - Behavioral pattern detection and outcome tracking
 
+### Skill Evolution (NEW in v3.4.10)
+- **Per-skill performance tracking** — automatically tracks which skills succeed and which fail, across sessions
+- **Execution trace analysis** — mines tool usage patterns around skill invocations to determine effectiveness
+- **Skill entities in Entity Explorer** — each skill becomes a browsable entity with performance facts and evolution history
+- **Dedicated Skill Evolution dashboard tab** — overview cards, performance assertions, skill correlations
+- **Behavioral assertions for skill routing** — soft prompts recommend high-performing skills in future sessions
+- **ECC integration** — enhanced observation support with [Everything Claude Code](https://github.com/affaan-m/everything-claude-code) via `slm ingest --source ecc`
+- **IDE compatibility:** Skill tracking currently works with Claude Code. The `/api/v3/tool-event` endpoint accepts events from any IDE client — adapters for other IDEs in future releases.
+
 ### Trust & Security
 - Bayesian Beta-distribution trust scoring (per-agent, per-fact)
 - Trust gates (block low-trust agents from writing/deleting)
@@ -507,6 +516,11 @@ Copyright (c) 2026 Varun Pratap Bhardwaj / Qualixar.
 ## Attribution
 
 Part of [Qualixar](https://qualixar.com) · Author: [Varun Pratap Bhardwaj](https://varunpratap.com)
+
+### Acknowledgments
+
+- **[Everything Claude Code (ECC)](https://github.com/affaan-m/everything-claude-code)** — SLM's skill observation patterns were inspired by ECC's continuous learning architecture. SLM supports direct ingestion of ECC observations via `slm ingest --source ecc`, giving ECC users richer skill performance tracking. We recommend ECC for Claude Code users who want the deepest learning experience alongside SLM.
+- **[HKUDS/OpenSpace](https://github.com/HKUDS/OpenSpace)** — The skill evolution research in SLM draws from the EvoSkills co-evolutionary verification concepts (arXiv:2604.01687). We adopted their 3-trigger evolution system and anti-loop guard patterns.
 
 ---
 

@@ -76,28 +76,43 @@ def _error(msg: str, use_json: bool) -> None:
 
 
 def _ingest_ecc(file_path: str, *, dry_run: bool = False) -> dict:
-    """Ingest ECC session summaries from transcript JSONL files.
+    """Ingest ECC observations into SLM tool_events.
 
-    Scans the Claude projects directory for session JSONL files and
-    extracts tool usage patterns from them.
+    Scans TWO sources:
+    1. ECC observation files (~/.claude/homunculus/projects/*/observations.jsonl)
+       — rich data: tool input/output, session_id, project context
+    2. Claude session transcript files (~/.claude/projects/*.jsonl)
+       — fallback: tool_use blocks from conversation history
+
+    v3.4.10: Now preserves input_summary and output_summary from ECC observations.
     """
     result = {"source": "ecc", "ingested": 0, "skipped": 0, "dry_run": dry_run}
 
-    # Find ECC session files
+    files: list[Path] = []
+
     if file_path:
         files = [Path(file_path)]
     else:
-        # Auto-discover: scan Claude project session files
+        # Source 1: ECC observation files (RICH data — preferred)
+        ecc_dir = Path.home() / ".claude" / "homunculus" / "projects"
+        if ecc_dir.exists():
+            ecc_files = sorted(
+                ecc_dir.rglob("observations.jsonl"),
+                key=lambda p: p.stat().st_mtime, reverse=True,
+            )
+            files.extend(ecc_files[:20])
+
+        # Source 2: Claude session transcripts (fallback)
         claude_dir = Path.home() / ".claude" / "projects"
-        if not claude_dir.exists():
-            result["error"] = f"Claude projects dir not found: {claude_dir}"
-            return result
-        files = sorted(claude_dir.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-        # Limit to recent files (last 20)
-        files = files[:20]
+        if claude_dir.exists():
+            claude_files = sorted(
+                claude_dir.rglob("*.jsonl"),
+                key=lambda p: p.stat().st_mtime, reverse=True,
+            )
+            files.extend(claude_files[:20])
 
     if not files:
-        result["error"] = "No session files found"
+        result["error"] = "No ECC observation or session files found"
         return result
 
     result["files_scanned"] = len(files)
@@ -116,7 +131,6 @@ def _ingest_ecc(file_path: str, *, dry_run: bool = False) -> dict:
                         result["skipped"] += 1
                         continue
 
-                    # Extract tool usage from ECC session records
                     extracted = _extract_tool_events_from_record(record)
                     events.extend(extracted)
         except (OSError, PermissionError):
@@ -128,7 +142,6 @@ def _ingest_ecc(file_path: str, *, dry_run: bool = False) -> dict:
         result["sample"] = events[:5]
         return result
 
-    # Write to tool_events table
     if events:
         ingested = _write_tool_events(events)
         result["ingested"] = ingested
@@ -139,47 +152,79 @@ def _ingest_ecc(file_path: str, *, dry_run: bool = False) -> dict:
 
 
 def _extract_tool_events_from_record(record: dict) -> list[dict]:
-    """Extract tool events from a single ECC/Claude session JSONL record."""
-    events = []
+    """Extract tool events from a single ECC/Claude session JSONL record.
 
-    # Handle ECC summary format
+    Handles three formats:
+    1. ECC observation format: {"event": "tool_complete", "tool": "X", "input": "...", "output": "..."}
+    2. Claude transcript format: {"type": "assistant", "content": [{"type": "tool_use", ...}]}
+    3. Direct tool event format: {"tool_name": "X", "event_type": "complete"}
+
+    v3.4.10: Preserves input_summary and output_summary from all formats.
+    """
+    events = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Format 1: ECC observation format (from ~/.claude/homunculus/projects/*/observations.jsonl)
+    if "event" in record and "tool" in record:
+        event_type_raw = record.get("event", "")
+        if event_type_raw in ("tool_complete", "tool_start"):
+            event_type = "complete" if event_type_raw == "tool_complete" else "invoke"
+            events.append({
+                "tool_name": record["tool"],
+                "event_type": event_type,
+                "input_summary": str(record.get("input", ""))[:500],
+                "output_summary": str(record.get("output", ""))[:500],
+                "session_id": record.get("session", "ecc_import"),
+                "project_path": record.get("project_name", ""),
+                "created_at": record.get("timestamp", now_iso),
+            })
+        return events
+
+    # Format 2: Claude transcript format
     if "type" in record:
         rtype = record.get("type", "")
-
-        # Tool use records
         if rtype == "assistant" and "content" in record:
             content = record.get("content", [])
             if isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "tool_use":
                         tool_name = block.get("name", "unknown")
+                        raw_input = block.get("input", {})
+                        input_str = json.dumps(raw_input, default=str)[:500] if isinstance(raw_input, dict) else str(raw_input)[:500]
                         events.append({
                             "tool_name": tool_name,
                             "event_type": "complete",
+                            "input_summary": input_str,
+                            "output_summary": "",
                             "session_id": record.get("session_id", "ecc_import"),
-                            "created_at": record.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "project_path": "",
+                            "created_at": record.get("timestamp", now_iso),
                         })
-
-            # Also extract from tool_use type directly
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                    elif isinstance(block, dict) and block.get("type") == "tool_result":
                         tool_name = block.get("tool_use_id", "unknown")
                         is_error = block.get("is_error", False)
+                        raw_content = block.get("content", "")
+                        output_str = str(raw_content)[:500] if raw_content else ""
                         events.append({
                             "tool_name": tool_name,
                             "event_type": "error" if is_error else "complete",
+                            "input_summary": "",
+                            "output_summary": output_str,
                             "session_id": record.get("session_id", "ecc_import"),
-                            "created_at": record.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "project_path": "",
+                            "created_at": record.get("timestamp", now_iso),
                         })
 
-    # Handle direct tool event format (from hook output)
+    # Format 3: Direct tool event format (from hook output)
     if "tool_name" in record and "event_type" in record:
         events.append({
             "tool_name": record["tool_name"],
             "event_type": record.get("event_type", "complete"),
+            "input_summary": str(record.get("input_summary", ""))[:500],
+            "output_summary": str(record.get("output_summary", ""))[:500],
             "session_id": record.get("session_id", "ecc_import"),
-            "created_at": record.get("created_at", datetime.now(timezone.utc).isoformat()),
+            "project_path": record.get("project_path", ""),
+            "created_at": record.get("created_at", now_iso),
         })
 
     return events
@@ -228,7 +273,11 @@ def _ingest_jsonl(file_path: str, *, dry_run: bool = False) -> dict:
 
 
 def _write_tool_events(events: list[dict]) -> int:
-    """Write tool events to SLM's memory.db tool_events table."""
+    """Write tool events to SLM's memory.db tool_events table.
+
+    v3.4.10: Preserves input_summary, output_summary, and project_path
+    from enriched sources (ECC observations, enriched hook).
+    """
     db_path = MEMORY_DB
     if not db_path.exists():
         return 0
@@ -243,11 +292,14 @@ def _write_tool_events(events: list[dict]) -> int:
                     "INSERT INTO tool_events "
                     "(session_id, profile_id, project_path, tool_name, event_type, "
                     " input_summary, output_summary, duration_ms, metadata, created_at) "
-                    "VALUES (?, 'default', '', ?, ?, '', '', 0, '{}', ?)",
+                    "VALUES (?, 'default', ?, ?, ?, ?, ?, 0, '{}', ?)",
                     (
                         ev.get("session_id", "import"),
+                        ev.get("project_path", ""),
                         ev["tool_name"],
                         ev.get("event_type", "complete"),
+                        ev.get("input_summary", ""),
+                        ev.get("output_summary", ""),
                         ev.get("created_at", datetime.now(timezone.utc).isoformat()),
                     ),
                 )

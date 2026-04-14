@@ -178,6 +178,16 @@ class ConsolidationEngine:
                     logger.debug("Soft prompt generation (non-fatal): %s", exc)
                     results["soft_prompts"] = {"error": str(exc)}
 
+                # Step 10 (v3.4.10): Mine skill performance from tool events.
+                # Creates per-skill assertions and skill correlation patterns.
+                try:
+                    from superlocalmemory.learning.skill_performance_miner import SkillPerformanceMiner
+                    spm = SkillPerformanceMiner(self._db.db_path)
+                    results["skill_performance"] = spm.mine(profile_id)
+                except Exception as exc:
+                    logger.debug("Skill performance mining (non-fatal): %s", exc)
+                    results["skill_performance"] = {"error": str(exc)}
+
             results["success"] = True
         except Exception as exc:
             logger.warning(

@@ -139,6 +139,13 @@ class MemoryEngine:
         except Exception as exc:
             logger.debug("V3.4.7 schema migration: %s", exc)
 
+        # V3.4.10: Apply "Fortress" schema (backup_destinations, entity_blacklist)
+        try:
+            from superlocalmemory.storage.schema_v3410 import apply_v3410_schema
+            apply_v3410_schema(str(self._db.db_path))
+        except Exception as exc:
+            logger.debug("V3.4.10 schema migration: %s", exc)
+
         self._embedder = init_embedder(self._config)
 
         if self._caps.llm_fact_extraction:

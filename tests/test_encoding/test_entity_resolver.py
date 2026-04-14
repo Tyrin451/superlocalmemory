@@ -94,8 +94,10 @@ class TestGuessEntityType:
     def test_person_two_words(self) -> None:
         assert _guess_entity_type("Alice Smith") == "person"
 
-    def test_person_single_word(self) -> None:
-        assert _guess_entity_type("Alice") == "person"
+    def test_single_word_is_concept(self) -> None:
+        # v3.4.10: single words default to concept (too many false positives)
+        assert _guess_entity_type("Alice") == "concept"
+        assert _guess_entity_type("Dashboard") == "concept"
 
     def test_organization(self) -> None:
         assert _guess_entity_type("Acme Corp") == "organization"

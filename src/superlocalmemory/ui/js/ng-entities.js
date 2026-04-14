@@ -85,14 +85,23 @@
     var typeColor = getTypeColor(entity.type);
     var summaryText = entity.summary_preview || 'No summary yet — click to view details';
     var hasTruth = entity.has_compiled_truth;
+    var typeIcon = getTypeIcon(entity.type);
+
+    // Skill entities get a distinctive accent border
+    var borderAccent = entity.type === 'skill'
+      ? 'border-left:3px solid ' + typeColor + ';'
+      : '';
 
     return '<div class="col-md-6 col-lg-4">' +
-      '<div class="ng-glass" style="padding:16px;cursor:pointer;transition:border-color 0.2s" ' +
+      '<div class="ng-glass" style="padding:16px;cursor:pointer;transition:border-color 0.2s;' + borderAccent + '" ' +
         'onclick="showEntityDetail(\'' + escapeAttr(entity.name) + '\')" ' +
         'onmouseover="this.style.borderColor=\'var(--ng-border-prominent)\'" ' +
         'onmouseout="this.style.borderColor=\'var(--ng-border-subtle)\'">' +
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">' +
-          '<div style="font-weight:590;font-size:0.9375rem;color:var(--ng-text-primary)">' + escapeHtml(entity.name) + '</div>' +
+          '<div style="font-weight:590;font-size:0.9375rem;color:var(--ng-text-primary)">' +
+            '<i class="bi ' + typeIcon + '" style="color:' + typeColor + ';margin-right:4px"></i>' +
+            escapeHtml(entity.name) +
+          '</div>' +
           '<span class="ng-badge ng-badge-accent">' + escapeHtml(entity.type) + '</span>' +
         '</div>' +
         '<div style="font-size:0.8125rem;color:var(--ng-text-secondary);margin-bottom:8px;' +
@@ -105,6 +114,18 @@
         '</div>' +
       '</div>' +
     '</div>';
+  }
+
+  function getTypeIcon(type) {
+    var icons = {
+      person: 'bi-person',
+      concept: 'bi-lightbulb',
+      organization: 'bi-building',
+      place: 'bi-geo-alt',
+      event: 'bi-calendar-event',
+      skill: 'bi-lightning-charge'
+    };
+    return icons[type] || 'bi-circle';
   }
 
   // Show entity detail panel
@@ -253,7 +274,10 @@
   }
 
   function getTypeColor(type) {
-    var colors = { person: '#3b82f6', concept: '#10b981', organization: '#f59e0b', location: '#ef4444' };
+    var colors = {
+      person: '#3b82f6', concept: '#10b981', organization: '#f59e0b',
+      location: '#ef4444', skill: '#8b5cf6', event: '#ec4899'
+    };
     return colors[type] || '#7C6AEF';
   }
 

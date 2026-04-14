@@ -43,6 +43,14 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
+        /* Cloud account widget — sidebar (v3.4.10) */
+        #ng-account-widget:hover { background: rgba(255,255,255,0.06) !important; }
+        .account-dest-item { padding: 6px 0; display: flex; align-items: center; gap: 8px; }
+        .account-dest-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; }
+        .account-dest-badge.synced { background: rgba(0,212,170,0.15); color: #00D4AA; }
+        .account-dest-badge.failed { background: rgba(255,71,87,0.15); color: #ff4757; }
+        .account-dest-badge.never { background: rgba(255,255,255,0.06); color: #888; }
+
         /* Stat cards with gradient backgrounds */
         .stat-card {
             border: none;
@@ -1717,6 +1725,25 @@
                 <div id="entity-detail-panel" style="display:none;margin-top:24px"></div>
             </div>
 
+            <!-- Skill Evolution (v3.4.10 — Arsenal Evolution) -->
+            <div class="tab-pane fade" id="skills-pane">
+                <div class="ng-content-header">
+                    <div>
+                        <div class="ng-content-title"><i class="bi bi-lightning-charge"></i> Skill Evolution</div>
+                        <div class="ng-content-subtitle">Track skill performance, evolution history, and health status</div>
+                    </div>
+                    <button class="ng-btn" onclick="loadSkillEvolution()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                </div>
+                <div id="skills-overview-cards"></div>
+                <div id="skills-list" style="margin-top:24px">
+                    <div class="text-center" style="padding:24px;color:var(--ng-text-tertiary)">
+                        <div class="spinner-border" style="color:var(--ng-accent)"></div>
+                        <div style="margin-top:8px">Loading skill performance data...</div>
+                    </div>
+                </div>
+                <div id="skill-detail-panel" style="display:none;margin-top:24px"></div>
+            </div>
+
             <!-- Mesh Peers (v3.4.3 — Neural Glass) -->
             <div class="tab-pane fade" id="mesh-pane">
                 <div class="ng-content-header">
@@ -1974,6 +2001,31 @@
                         </div>
                     </div>
                 </div>
+                <!-- Cloud Backup (v3.4.10 "Fortress") -->
+                <div class="card p-3 mb-3">
+                    <h5 class="mb-3"><i class="bi bi-cloud-arrow-up"></i> Cloud Backup</h5>
+                    <p class="text-muted small mb-2">
+                        Sync your memory backups to Google Drive or GitHub. Credentials are stored securely in your OS keychain.
+                    </p>
+                    <div id="cloud-destinations" class="mb-3">
+                        <div class="text-muted small">Loading cloud destinations...</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-outline-primary btn-sm" onclick="connectGoogleDrive()">
+                            <i class="bi bi-google"></i> Connect Google Drive
+                        </button>
+                        <button class="btn btn-outline-dark btn-sm" onclick="connectGitHub()">
+                            <i class="bi bi-github"></i> Connect GitHub
+                        </button>
+                        <button class="btn btn-outline-success btn-sm" onclick="syncCloudNow()">
+                            <i class="bi bi-cloud-upload"></i> Sync Now
+                        </button>
+                        <button class="btn btn-outline-info btn-sm" onclick="exportBackup()">
+                            <i class="bi bi-file-earmark-zip"></i> Export Backup
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Learning Data Management (v2.7.4) -->
                 <div class="card p-3 mb-3">
                     <h5 class="mb-3"><i class="bi bi-brain"></i> Learning Data</h5>
@@ -2097,9 +2149,10 @@
     <!-- Neural Glass v3.4.4 — Dashboard V2 -->
     <script src="static/js/ng-health.js?v=345"></script>
     <script src="static/js/ng-ingestion.js?v=345"></script>
-    <script src="static/js/ng-entities.js?v=345"></script>
+    <script src="static/js/ng-entities.js?v=3410"></script>
+    <script src="static/js/ng-skills.js?v=3410"></script>
     <script src="static/js/ng-mesh.js?v=345"></script>
-    <script src="static/js/ng-shell.js?v=345"></script>
+    <script src="static/js/ng-shell.js?v=3410"></script>
 
     <footer style="text-align:center; padding:24px; border-top:1px solid var(--bs-border-color); font-size:0.8125rem;">
         <div style="display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:8px;">

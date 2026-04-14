@@ -52,6 +52,9 @@ _PLACE_MARKERS = ("City", "State", "County", "Island", "River", "Mountain",
                   "Lake", "Park", "Street", "Avenue", "Road", "District")
 _EVENT_MARKERS = ("Festival", "Conference", "Summit", "Workshop", "Meeting",
                   "Election", "War", "Match", "Game", "Concert", "Wedding")
+# v3.4.10: Skill entity type — skills, commands, agents, plugins
+_SKILL_MARKERS = ("skill", "command", "agent", "plugin", "hook", "mcp")
+_SKILL_NAMESPACE_RE = re.compile(r"^[\w-]+:[\w-]+$")  # e.g., "superpowers:brainstorming"
 
 
 # ---------------------------------------------------------------------------
@@ -113,25 +116,67 @@ def jaro_winkler(s1: str, s2: str, prefix_weight: float = 0.1) -> float:
 
 
 _COMMON_WORDS = frozenset({
-    "april", "may", "june", "march", "august", "phase", "test", "gap",
-    "dashboard", "remaining", "session", "results", "tools", "projects",
-    "prompts", "integration", "cli", "engagement", "mode", "error",
-    "step", "fix", "build", "check", "run", "start", "stop", "config",
-    "status", "version", "query", "data", "file", "path", "node", "edge",
-    "table", "index", "schema", "model", "type", "class", "function",
-    "module", "package", "import", "export", "default", "pattern",
+    # Months / time words (biggest source of garbage entities)
+    "january", "february", "march", "april", "may", "june", "july",
+    "august", "september", "october", "november", "december",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "today", "tomorrow", "yesterday", "morning", "evening", "night",
+    # English stop words that get capitalized at sentence start
+    "a", "an", "the", "all", "not", "no", "yes", "and", "or", "but",
+    "if", "is", "are", "was", "were", "be", "been", "being", "have",
+    "has", "had", "do", "does", "did", "will", "would", "shall", "should",
+    "can", "could", "just", "also", "only", "very", "too", "so", "then",
+    "than", "that", "this", "these", "those", "here", "there", "where",
+    "when", "what", "which", "who", "whom", "how", "why", "each", "every",
+    "both", "few", "more", "most", "other", "some", "such", "any", "many",
+    "much", "own", "same", "new", "old", "first", "last", "next", "now",
+    "still", "already", "always", "never", "often", "sometimes", "about",
+    "above", "after", "again", "against", "along", "among", "around",
+    "before", "below", "between", "beyond", "during", "except", "from",
+    "into", "near", "off", "onto", "out", "over", "past", "since",
+    "through", "under", "until", "upon", "with", "within", "without",
+    # Technical stop words (common in dev sessions)
+    "phase", "test", "gap", "dashboard", "remaining", "session", "results",
+    "tools", "projects", "prompts", "integration", "cli", "engagement",
+    "mode", "error", "step", "fix", "build", "check", "run", "start",
+    "stop", "config", "status", "version", "query", "data", "file", "path",
+    "node", "edge", "table", "index", "schema", "model", "type", "class",
+    "function", "module", "package", "import", "export", "default", "pattern",
     "memory", "profile", "context", "pipeline", "worker", "daemon",
     "server", "client", "route", "endpoint", "handler", "hook",
+    "feature", "release", "update", "upgrade", "deploy", "debug", "log",
+    "output", "input", "key", "value", "true", "false", "null", "none",
+    "ready", "done", "todo", "complete", "pending", "active", "failed",
+    "success", "warning", "critical", "high", "medium", "low",
+    "total", "count", "list", "item", "entry", "record", "row", "column",
+    "source", "target", "origin", "destination", "backup", "restore",
+    "create", "read", "delete", "remove", "add", "set", "get", "put",
+    "push", "pull", "fetch", "send", "receive", "request", "response",
+    "enable", "disable", "open", "close", "load", "save", "reset",
+    # Abstract nouns often misclassified as people
+    "completeness", "correctness", "limitations", "requirements",
+    "dependencies", "performance", "security", "quality", "coverage",
+    "progress", "analysis", "research", "implementation", "verification",
+    "overview", "summary", "details", "notes", "changes", "issues",
+    "approach", "strategy", "solution", "problem", "question", "answer",
 })
 
 
 def _guess_entity_type(name: str) -> str:
     """Heuristic entity type classification from name string.
 
-    v3.4.8: Fixed false-positive "person" classification. Single capitalized
-    common words (April, Phase, Dashboard) are concepts, not people.
-    Only classify as "person" when it looks like a real human name.
+    v3.4.10: Aggressive false-positive prevention. "person" is assigned ONLY
+    when the name looks like a real human name (2-3 capitalized words, none
+    in the stop list). Everything else defaults to "concept".
     """
+    # Reject very short or very long names
+    if len(name) <= 2 or len(name) > 100:
+        return "concept"
+
+    # Reject pure numbers, dates, version strings
+    if re.match(r"^[\d.v\-/]+$", name):
+        return "concept"
+
     if any(m in name for m in _ORG_MARKERS):
         return "organization"
     if any(m in name for m in _PLACE_MARKERS):
@@ -139,30 +184,35 @@ def _guess_entity_type(name: str) -> str:
     if any(m in name for m in _EVENT_MARKERS):
         return "event"
 
-    # Filter out common words that aren't people
-    if name.lower() in _COMMON_WORDS:
+    # v3.4.10: Skill entities — namespaced skills or skill-related terms
+    if _SKILL_NAMESPACE_RE.match(name):
+        return "skill"
+    name_lower = name.lower()
+    if any(m in name_lower for m in _SKILL_MARKERS):
+        return "skill"
+
+    # Check ALL words against the stop list (not just the full name)
+    words = name.lower().split()
+    if any(w in _COMMON_WORDS for w in words):
         return "concept"
 
-    # Two capitalized words = likely a person name (e.g. "Varun Bhardwaj")
-    if re.match(r"^[A-Z][a-z]+ [A-Z][a-z]+$", name):
-        # But not if either word is a common term
-        parts = name.lower().split()
-        if not any(p in _COMMON_WORDS for p in parts):
+    # Multi-word entity: "person" only if 2-3 capitalized words, no stop words
+    if re.match(r"^[A-Z][a-z]+ [A-Z][a-z]+( [A-Z][a-z]+)?$", name):
+        if not any(p in _COMMON_WORDS for p in words):
             return "person"
 
-    # Single short capitalized word with no digits or dots = concept, not person
-    # "person" should only be assigned for real names, not generic terms
+    # Single capitalized word — almost never a person in our context
+    # Only known first names should get "person" but we can't maintain
+    # a name dictionary, so default to "concept"
     if re.match(r"^[A-Z][a-z]+$", name):
-        if name.lower() in _COMMON_WORDS:
-            return "concept"
-        # Only classify as person if it's a plausible first name
-        # (short word not in common terms — still a heuristic)
-        if len(name) <= 3:
-            return "concept"
-        return "person"
+        return "concept"
 
-    # Contains dots/slashes/hyphens = likely a technical term
+    # Contains dots/slashes/hyphens/underscores = technical term
     if re.search(r"[./\-_]", name):
+        return "concept"
+
+    # ALL-CAPS or mixed case with numbers = technical/concept
+    if re.match(r"^[A-Z]+$", name) or re.search(r"\d", name):
         return "concept"
 
     return "concept"
@@ -209,6 +259,23 @@ class EntityResolver:
         for raw in raw_entities:
             name = raw.strip()
             if not name or name.lower() in PRONOUNS:
+                continue
+
+            # Skip very short/long entities
+            if len(name) <= 2 or len(name) > 100:
+                continue
+
+            # Skip single-word stop words
+            words = name.lower().split()
+            if len(words) == 1 and name.lower() in _COMMON_WORDS:
+                continue
+
+            # Skip multi-word entities where ALL words are stop words or <=2 chars
+            if len(words) > 1 and all(w in _COMMON_WORDS or len(w) <= 2 for w in words):
+                continue
+
+            # Skip pure numbers/versions
+            if re.match(r"^[\d.v\-/]+$", name):
                 continue
 
             # Tier a: exact match on canonical_name

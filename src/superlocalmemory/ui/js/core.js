@@ -243,4 +243,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (typeof initEventStream === 'function') initEventStream();
     if (typeof loadEventStats === 'function') loadEventStats();
     if (typeof loadAgents === 'function') loadAgents();
+
+    // v3.4.10 — Account widget (cloud backup status in header)
+    if (typeof loadCloudDestinations === 'function') loadCloudDestinations();
 });

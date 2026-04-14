@@ -244,8 +244,18 @@ async def get_soft_prompts():
 async def log_tool_event_api(data: dict):
     """Log a tool event via HTTP (called by PostToolUse hook).
 
-    Body: { "tool_name": "Read", "event_type": "complete" }
-    Lightweight — no LLM, just an INSERT. For the shipped hook.
+    Body (v3.4.10 enriched):
+    {
+        "tool_name": "Skill",
+        "event_type": "complete",
+        "input_summary": "{\"skill\": \"superpowers:brainstorming\"}",
+        "output_summary": "{\"success\": true}",
+        "session_id": "abc123",
+        "project_path": "/path/to/project"
+    }
+
+    All fields except tool_name are optional for backward compatibility.
+    Lightweight — no LLM, just an INSERT.
     """
     try:
         import sqlite3 as _sqlite3
@@ -254,17 +264,25 @@ async def log_tool_event_api(data: dict):
 
         tool_name = data.get("tool_name", "unknown")
         event_type = data.get("event_type", "complete")
+        input_summary = data.get("input_summary", "")
+        output_summary = data.get("output_summary", "")
+        session_id = data.get("session_id") or os.environ.get("CLAUDE_SESSION_ID", "hook")
+        project_path = data.get("project_path", "")
         now = datetime.now(timezone.utc).isoformat()
-        session_id = data.get("session_id", os.environ.get("CLAUDE_SESSION_ID", "hook"))
         profile = get_active_profile()
+
+        # Truncate to prevent oversized payloads (defense in depth)
+        input_summary = str(input_summary)[:500] if input_summary else ""
+        output_summary = str(output_summary)[:500] if output_summary else ""
 
         conn = _sqlite3.connect(str(MEMORY_DIR / "memory.db"))
         conn.execute(
             "INSERT INTO tool_events "
             "(session_id, profile_id, project_path, tool_name, event_type, "
             " input_summary, output_summary, duration_ms, metadata, created_at) "
-            "VALUES (?, ?, ?, ?, ?, '', '', 0, '{}', ?)",
-            (session_id, profile, "", tool_name, event_type, now),
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, '{}', ?)",
+            (session_id, profile, project_path, tool_name, event_type,
+             input_summary, output_summary, now),
         )
         conn.commit()
         conn.close()
