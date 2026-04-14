@@ -4,7 +4,7 @@
 
 <h1 align="center">SuperLocalMemory V3.4</h1>
 <p align="center"><strong>Every other AI forgets. Yours won't.</strong><br/><em>Infinite memory for Claude Code, Cursor, Windsurf & 17+ AI tools.</em></p>
-<p align="center"><code>v3.4.4 "Neural Glass"</code> — Install once. Every session remembers the last. Automatically.</p>
+<p align="center"><code>v3.4.11</code> — Install once. Every session remembers the last. Automatically.</p>
 <p align="center"><strong>Backed by 3 peer-reviewed research papers</strong> · <a href="https://arxiv.org/abs/2603.02240">arXiv:2603.02240</a> · <a href="https://arxiv.org/abs/2603.14588">arXiv:2603.14588</a> · <a href="https://arxiv.org/abs/2604.04514">arXiv:2604.04514</a></p>
 
 <p align="center">
@@ -378,15 +378,20 @@ Auto-capture hooks: `slm hooks install` + `slm observe` + `slm session-context`.
 - Auto-learned soft prompts injected into agent context
 - Behavioral pattern detection and outcome tracking
 
-### Skill Evolution (NEW in v3.4.10)
-- **Per-skill performance tracking** — automatically tracks which skills succeed and which fail, across sessions (zero-LLM, always on)
-- **Execution trace analysis** — mines tool usage patterns around skill invocations to determine effectiveness
-- **Skill entities in Entity Explorer** — each skill becomes a browsable entity with performance facts and evolution history
-- **Dedicated Skill Evolution dashboard tab** — overview cards, performance assertions, skill correlations
-- **Behavioral assertions for skill routing** — soft prompts recommend high-performing skills in future sessions
-- **LLM-powered skill evolution** — 3-trigger system (post-session + degradation + health check) with blind verification. **Off by default** — opt-in via `slm config set evolution.enabled true`. Supports Ollama (free, local), Anthropic API, and OpenAI API backends.
-- **ECC integration** — enhanced observation support with [Everything Claude Code](https://github.com/affaan-m/everything-claude-code) via `slm ingest --source ecc`
-- **IDE compatibility:** Skill tracking currently works with Claude Code. The `/api/v3/tool-event` endpoint accepts events from any IDE client — adapters for other IDEs in future releases.
+### Skill Evolution
+- **Per-skill performance tracking** — tracks which skills succeed and fail across sessions (zero-LLM, always on)
+- **Evolution engine** — 3-trigger system with blind verification. Off by default — enable via `slm config set evolution.enabled true`
+- **MCP tools** — `evolve_skill`, `skill_health`, `skill_lineage` for programmatic access
+- **Lineage DAG** — visual evolution history in the dashboard
+- **CLI config** — `slm config get/set` for all evolution settings
+- **Post-session triggers** — automatic analysis on session end via Stop hook
+- **[ECC](https://github.com/affaan-m/everything-claude-code) integration** — optional enhanced observations via `slm ingest --source ecc`
+
+### Tiered Storage & Scaling
+- **4-tier lifecycle** — active, warm, cold, archived with automatic promotion/demotion
+- **Deep recall** — archived facts searchable at reduced weight
+- **Graph pruning** — automatic cleanup of orphan edges, self-loops, duplicates
+- **Fact consolidation** — clusters related facts into consolidated summaries
 
 ### Trust & Security
 - Bayesian Beta-distribution trust scoring (per-agent, per-fact)
@@ -397,9 +402,9 @@ Auto-capture hooks: `slm hooks install` + `slm observe` + `slm session-context`.
 ### Infrastructure
 - 23-tab web dashboard with real-time visualization
 - 17+ IDE integrations (Claude, Cursor, Windsurf, VS Code, JetBrains, Zed, etc.)
-- 35 MCP tools + 7 MCP resources
+- 38 MCP tools + 7 MCP resources
 - Profile isolation (independent memory spaces)
-- 1400+ tests, AGPL v3, cross-platform (Mac/Linux/Windows)
+- 2,900+ tests, AGPL v3, cross-platform (Mac/Linux/Windows)
 - CPU-only — no GPU required
 - Automatic orphaned process cleanup
 
