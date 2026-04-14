@@ -187,6 +187,37 @@ class RetrievalEngine:
             except Exception as exc:
                 logger.warning("Scene expansion: %s", exc)
 
+        # V3.4.11: Entity graph signal enhancement (post-RRF boost)
+        # Instead of competing as independent channel, entity_graph SCORES
+        # the candidates from other channels by graph proximity to query entities.
+        # Research: Microsoft GraphRAG DRIFT, Pistis-RAG cascaded architecture.
+        if (self._entity is not None
+                and "entity_graph" not in set(self._config.disabled_channels)
+                and fused):
+            try:
+                candidate_ids = [fr.fact_id for fr in fused[:100]]
+                eg_scores = self._entity.score_candidates(
+                    query, candidate_ids, profile_id,
+                )
+                if eg_scores:
+                    boosted = []
+                    for fr in fused:
+                        eg_sc = eg_scores.get(fr.fact_id, 0.0)
+                        if eg_sc > 0:
+                            eg_weight = strat.weights.get("entity_graph", 1.0)
+                            boost = 1.0 + eg_sc * eg_weight * 0.3
+                            boosted.append(FusionResult(
+                                fact_id=fr.fact_id,
+                                fused_score=fr.fused_score * boost,
+                                channel_ranks=fr.channel_ranks,
+                                channel_scores={**fr.channel_scores, "entity_graph": eg_sc},
+                            ))
+                        else:
+                            boosted.append(fr)
+                    fused = sorted(boosted, key=lambda r: r.fused_score, reverse=True)
+            except Exception as exc:
+                logger.warning("Entity graph signal enhancement: %s", exc)
+
         # 4. Load facts for rerank pool
         pool = min(len(fused), max(effective_limit * 3, 30))
         top = fused[:pool]
@@ -448,13 +479,9 @@ class RetrievalEngine:
             except Exception as exc:
                 logger.warning("BM25 channel: %s", exc)
 
-        if self._entity is not None and "entity_graph" not in disabled:
-            try:
-                r = self._entity.search(query, profile_id, top_k=self._config.bm25_top_k)
-                if r:
-                    out["entity_graph"] = r
-            except Exception as exc:
-                logger.warning("Entity channel: %s", exc)
+        # V3.4.12: entity_graph is now a signal enhancer (post-RRF boost),
+        # not an independent channel. Removed from channel execution to avoid
+        # running spreading activation twice. See score_candidates() in engine.recall().
 
         if self._temporal is not None and "temporal" not in disabled:
             try:

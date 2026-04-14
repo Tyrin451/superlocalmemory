@@ -587,6 +587,9 @@ def _register_daemon_routes(application: FastAPI) -> None:
                     "score": round(r.score, 4),
                     "fact_type": getattr(r.fact.fact_type, 'value', str(r.fact.fact_type)),
                     "fact_id": r.fact.fact_id,
+                    "channel_scores": {
+                        k: round(v, 4) for k, v in r.channel_scores.items()
+                    } if r.channel_scores else {},
                 }
                 for r in response.results
             ]

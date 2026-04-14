@@ -133,7 +133,10 @@ class TestFourChannelPipeline:
         result_ids = {r.fact.fact_id for r in response.results}
         assert "f_sem" in result_ids
         assert "f_bm25" in result_ids
-        assert "f_entity" in result_ids
+        # V3.4.12: entity_graph is now a signal enhancer (post-RRF boost),
+        # not an independent channel. It scores candidates from other channels
+        # rather than producing its own results. f_entity won't appear unless
+        # it's also found by semantic/BM25/temporal.
         assert "f_temp" in result_ids
 
     def test_semantic_only_works(self) -> None:
@@ -153,11 +156,14 @@ class TestFourChannelPipeline:
         response = engine.recall("q", "default")
         assert len(response.results) == 1
 
-    def test_entity_graph_only_works(self) -> None:
-        """A single entity_graph channel is sufficient to produce results."""
+    def test_entity_graph_enhances_bm25(self) -> None:
+        """V3.4.12: entity_graph is a signal enhancer, not independent channel.
+        It boosts BM25/semantic candidates by graph proximity."""
         facts = [_make_fact("f1", "Charlie mentioned the product roadmap in the planning session")]
         db = _mock_db(facts)
-        engine = _build_engine(db=db, entity_results=[("f1", 0.7)])
+        # entity_graph alone produces 0 results (it's a post-RRF enhancer now)
+        # but combined with BM25, it boosts the result
+        engine = _build_engine(db=db, bm25_results=[("f1", 0.8)], entity_results=[("f1", 0.7)])
         response = engine.recall("q", "default")
         assert len(response.results) == 1
 

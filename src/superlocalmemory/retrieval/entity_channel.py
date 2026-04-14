@@ -370,6 +370,124 @@ class EntityGraphChannel:
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_k]
 
+    def score_candidates(
+        self,
+        query: str,
+        candidate_fact_ids: list[str],
+        profile_id: str,
+    ) -> dict[str, float]:
+        """Score candidate facts by their entity-graph proximity to query entities.
+
+        V3.4.11 "Signal Enhancer" architecture: instead of returning its own
+        independent set of fact_ids (which get outranked by multi-channel facts
+        in RRF), this method scores EXISTING candidates from semantic/BM25
+        by their graph connectivity to query entities.
+
+        Research basis: Microsoft GraphRAG DRIFT Search, HippoRAG, Pistis-RAG
+        cascaded architecture. Graph signals act as post-retrieval boosters,
+        not independent retrievers. Avoids the "weakest link" phenomenon where
+        non-overlapping result sets cause rank collapse in RRF fusion.
+
+        Args:
+            query: The user's query string.
+            candidate_fact_ids: Fact IDs from semantic/BM25/other channels.
+            profile_id: User profile.
+
+        Returns:
+            Dict mapping fact_id → entity_graph score [0, 1].
+            Facts with no entity connection return 0.
+            Facts directly linked to query entities score ~1.0.
+            Facts 1-hop away score ~0.7 (decay factor).
+        """
+        if not candidate_fact_ids:
+            return {}
+
+        raw_entities = extract_query_entities(query)
+        if not raw_entities:
+            return {}
+
+        canonical_ids = self._resolve_entities(raw_entities, profile_id)
+        if not canonical_ids:
+            return {}
+
+        self._ensure_adjacency(profile_id)
+
+        # Run full spreading activation (same as search())
+        activation: dict[str, float] = defaultdict(float)
+        visited_entities: set[str] = set(canonical_ids)
+        use_cache = bool(self._entity_to_facts)
+
+        for eid in canonical_ids:
+            if use_cache:
+                for fid in self._entity_to_facts.get(eid, ()):
+                    activation[fid] = max(activation[fid], 1.0)
+            else:
+                for fact in self._db.get_facts_by_entity(eid, profile_id):
+                    activation[fact.fact_id] = max(activation[fact.fact_id], 1.0)
+
+        frontier = set(activation.keys())
+        for hop in range(1, self._max_hops):
+            hop_decay = self._decay ** hop
+            if hop_decay < self._threshold:
+                break
+            next_frontier: set[str] = set()
+            for fid in frontier:
+                if use_cache:
+                    for neighbor, edge_weight in self._adj.get(fid, ()):
+                        if self._graph_metrics:
+                            weighted = activation[fid] * self._decay * edge_weight
+                            if neighbor in self._graph_metrics:
+                                pr = self._graph_metrics[neighbor].get("pagerank_score", 0.0)
+                                weighted *= min(1.0 + pr * 2.0, 2.0)
+                        else:
+                            weighted = activation[fid] * self._decay
+                        if weighted >= self._threshold and weighted > activation.get(neighbor, 0.0):
+                            activation[neighbor] = weighted
+                            next_frontier.add(neighbor)
+
+            if use_cache:
+                for fid in frontier:
+                    for eid in self._fact_to_entities.get(fid, ()):
+                        if eid not in visited_entities:
+                            visited_entities.add(eid)
+                            for linked_fid in self._entity_to_facts.get(eid, ()):
+                                if hop_decay > activation.get(linked_fid, 0.0):
+                                    activation[linked_fid] = hop_decay
+                                    next_frontier.add(linked_fid)
+
+            frontier = next_frontier
+            if not frontier:
+                break
+
+        # Community-aware boosting (same as search)
+        if self._graph_metrics and use_cache:
+            from collections import Counter as _Counter
+            seed_communities: _Counter = _Counter()
+            for eid in canonical_ids:
+                for fid in self._entity_to_facts.get(eid, ()):
+                    m = self._graph_metrics.get(fid, {})
+                    comm = m.get("community_id")
+                    if comm is not None:
+                        seed_communities[comm] += 1
+            if seed_communities:
+                total_seeds = sum(seed_communities.values())
+                for fid in list(activation.keys()):
+                    m = self._graph_metrics.get(fid, {})
+                    fact_comm = m.get("community_id")
+                    if fact_comm is not None and fact_comm in seed_communities:
+                        boost = min(1.0 + 0.15 * (seed_communities[fact_comm] / total_seeds), 1.3)
+                        activation[fid] *= boost
+
+        # Extract scores ONLY for the candidate set, normalize to [0, 1]
+        candidate_set = set(candidate_fact_ids)
+        scored = {fid: activation.get(fid, 0.0) for fid in candidate_set}
+
+        max_score = max(scored.values()) if scored else 0
+        if max_score > 0:
+            scored = {fid: sc / max_score for fid, sc in scored.items()}
+
+        return scored
+
     def _suppress_contradictions(
         self, activation: dict[str, float], profile_id: str,
     ) -> None:
