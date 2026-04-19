@@ -476,7 +476,7 @@ def _init_quantization_aware_search(
             quantized_store=q_store,
             config=config.quantization,
         )
-        logger.info("QuantizationAwareSearch initialized (TurboQuant 3-tier search)")
+        logger.info("QuantizationAwareSearch initialized (3-tier quantization pipeline)")
         return qas
     except Exception as exc:
         logger.debug("QuantizationAwareSearch init failed (non-fatal): %s", exc)
