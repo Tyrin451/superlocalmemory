@@ -35,6 +35,11 @@ try:
 except ImportError:
     resource = None
 
+try:
+    import hnswlib  # noqa: F401
+except ImportError:
+    pytest.skip("hnswlib not installed — all tests require it", allow_module_level=True)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
