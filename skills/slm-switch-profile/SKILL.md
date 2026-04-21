@@ -1,7 +1,7 @@
 ---
 name: slm-switch-profile
 description: Switch between memory profiles for context isolation and management. Use when the user wants to change profile context, separate work/personal memories, or manage multiple independent memory spaces. Each profile has its own database, graph, and patterns.
-version: "3.4.22"
+version: "3.4.23"
 license: AGPL-3.0-or-later
 compatibility: "Requires SuperLocalMemory V2 installed at ~/.claude-memory/"
 attribution:

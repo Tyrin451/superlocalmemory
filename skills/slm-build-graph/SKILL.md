@@ -1,7 +1,7 @@
 ---
 name: slm-build-graph
 description: Build or rebuild the knowledge graph from existing memories using TF-IDF entity extraction and Leiden clustering. Use when search results seem poor, after bulk imports, or to optimize performance. Automatically discovers relationships between memories and creates topic clusters.
-version: "3.4.22"
+version: "3.4.23"
 license: AGPL-3.0-or-later
 compatibility: "Requires SuperLocalMemory V2 installed at ~/.claude-memory/, optional dependencies: python-igraph, leidenalg"
 attribution:

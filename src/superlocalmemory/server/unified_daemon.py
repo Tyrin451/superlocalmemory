@@ -495,9 +495,20 @@ async def lifespan(application: FastAPI):
     global _start_time
     _start_time = time.monotonic()
     _last_activity = time.monotonic()
-    logger.info("Unified daemon ready on port %d (24/7 mode)" if idle_timeout <= 0
-                else "Unified daemon ready on port %d (idle timeout: %ds)",
-                _DEFAULT_PORT, idle_timeout)
+    # v3.4.23: pre-format the ready message. Previous code passed a ternary as
+    # the log format string with a fixed 2-arg tuple; when idle_timeout<=0 the
+    # chosen branch had only one %d, triggering a TypeError on every startup.
+    # Python's logging module then wrote the full stack to stderr. Because the
+    # call runs inside FastAPI's stacked merged_lifespan, each dump was ~30 KB
+    # and the error log grew to tens of MB within a day.
+    if idle_timeout <= 0:
+        _ready_msg = f"Unified daemon ready on port {_DEFAULT_PORT} (24/7 mode)"
+    else:
+        _ready_msg = (
+            f"Unified daemon ready on port {_DEFAULT_PORT} "
+            f"(idle timeout: {idle_timeout}s)"
+        )
+    logger.info(_ready_msg)
 
     yield
 
@@ -850,7 +861,18 @@ def _register_dashboard_routes(application: FastAPI) -> None:
     _data_io_mod.ws_manager = ws_manager
 
     # Root page
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, JSONResponse
+
+    # v3.4.23: /api/version — dashboard polls this to detect daemon upgrades
+    # and auto-reload stale tabs (see ui/js/core.js::checkVersionFingerprint).
+    try:
+        from superlocalmemory import __version__ as _SLM_VERSION
+    except Exception:  # pragma: no cover — defensive
+        _SLM_VERSION = "unknown"
+
+    @application.get("/api/version")
+    async def api_version():
+        return JSONResponse({"version": _SLM_VERSION})
 
     @application.get("/", response_class=HTMLResponse)
     async def root():
@@ -863,7 +885,11 @@ def _register_dashboard_routes(application: FastAPI) -> None:
                 "<p><a href='/docs'>API Documentation</a></p>"
                 "</body></html>"
             )
-        return index_path.read_text()
+        # v3.4.23: substitute version placeholder so the dashboard can detect
+        # upgrades and auto-reload. Read fresh each request (daemon uptime is
+        # days, but we want zero caching surprises during development).
+        html = index_path.read_text()
+        return html.replace("__SLM_VERSION__", _SLM_VERSION)
 
     # Startup event for event listener
     @application.on_event("startup")
@@ -1066,6 +1092,13 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
     global _start_time
     import uvicorn
 
+    # v3.4.23: rotate oversized logs before anything else so both the CLI
+    # path (`slm serve`) and the LaunchAgent path (__main__) are covered.
+    try:
+        rotate_oversized_logs()
+    except Exception:
+        pass  # never block startup on log housekeeping
+
     _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     _PID_FILE.write_text(str(os.getpid()))
     _PORT_FILE.write_text(str(port))
@@ -1095,10 +1128,79 @@ def start_server(port: int = _DEFAULT_PORT) -> None:
 
 
 # ---------------------------------------------------------------------------
+# v3.4.23 — Startup log rotation
+# ---------------------------------------------------------------------------
+# The LaunchAgent plist redirects stdout/stderr to daemon.log and
+# daemon-error.log. Those files are managed by launchd, not Python, so
+# Python's RotatingFileHandler cannot prune them. If any bug ever writes
+# large amounts of data to stderr (the v3.4.22 logger-format bug produced
+# ~30 KB per startup and the file grew to 69 MB), end users end up with a
+# disk-eating log they never knew existed.
+#
+# rotate_oversized_logs() is a belt-and-suspenders guard: every time the
+# daemon starts, if either log exceeds MAX_LOG_BYTES we rename the current
+# file to ".1" (keeping one rotated copy) and truncate the original so
+# launchd's open file descriptor keeps working. This is cheap, stateless,
+# and independent of whatever caused the overflow.
+# ---------------------------------------------------------------------------
+
+_MAX_LOG_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def rotate_oversized_logs(log_dir: Optional[Path] = None,
+                          max_bytes: int = _MAX_LOG_BYTES) -> None:
+    """Rotate daemon.log and daemon-error.log at startup if oversized.
+
+    Keeps one rotated copy (.1). Safe under concurrent start attempts:
+    rename is atomic on POSIX, and truncation is idempotent.
+    """
+    log_dir = log_dir or (Path.home() / ".superlocalmemory" / "logs")
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+    for name in ("daemon.log", "daemon-error.log", "daemon.json.log"):
+        path = log_dir / name
+        try:
+            if not path.exists() or path.stat().st_size <= max_bytes:
+                continue
+            rotated = log_dir / f"{name}.1"
+            try:
+                if rotated.exists():
+                    rotated.unlink()
+            except Exception:
+                pass
+            try:
+                path.rename(rotated)
+            except Exception:
+                # If rename fails (e.g., file is the open stderr fd under
+                # launchd), fall back to truncation so we at least reclaim
+                # disk without breaking the redirect.
+                try:
+                    with open(path, "w"):
+                        pass
+                except Exception:
+                    pass
+                continue
+            # Re-create the original path as empty so launchd's redirect
+            # keeps appending to a fresh file.
+            try:
+                path.touch()
+            except Exception:
+                pass
+        except Exception:
+            # Log rotation must never prevent daemon startup.
+            continue
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    # Rotate first, then configure logging, so the first log line lands in a
+    # freshly-sized file.
+    rotate_oversized_logs()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     port = _DEFAULT_PORT
     for arg in sys.argv:

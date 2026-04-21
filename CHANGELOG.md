@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.23] - 2026-04-21
+
+Critical hotfix on top of 3.4.22 for two end-user-facing regressions.
+
+### Fixed
+- **Daemon error log no longer balloons.** A ternary passed as the
+  `logger.info` format string caused a `TypeError` on every startup in 24/7
+  mode. Python's logging module then dumped the full FastAPI
+  `merged_lifespan` stack to stderr; over a day the LaunchAgent log grew to
+  tens of MB. The call is now pre-formatted. A defensive log-rotation pass
+  at startup truncates any daemon log over 10 MB so users upgrading from
+  3.4.22 get a clean slate on first boot.
+- **Dashboard no longer hangs after a daemon upgrade.** Static JS/CSS/HTML
+  was served without cache headers, so browsers served stale modules after
+  `slm restart` and the dashboard showed an infinite spinner. All static
+  responses now ship `Cache-Control: no-cache, must-revalidate`, and
+  `index.html` embeds the server version; on mismatch the tab clears
+  `localStorage` (preserving theme) and hard-reloads once.
+- **Fetches can no longer hang forever.** A global `fetch` patch attaches a
+  15-second `AbortController` timeout to every relative-URL request, so a
+  dead socket surfaces as a rejection instead of leaving a spinner
+  spinning. No callsite changes required.
+
+### Added
+- `GET /api/version` — returns the running daemon version; consumed by the
+  dashboard version-fingerprint auto-reload.
+
+---
+
 ## [3.4.22] - 2026-04-18
 
 Hardening release — correctness, stability, and security fixes.

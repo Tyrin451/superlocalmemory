@@ -1,7 +1,7 @@
 ---
 name: slm-list-recent
 description: List most recent memories in chronological order. Use when the user wants to see what was recently saved, review recent conversations, check what they worked on today, or browse memory history. Shows memories sorted by creation time (newest first).
-version: "3.4.22"
+version: "3.4.23"
 license: AGPL-3.0-or-later
 compatibility: "Requires SuperLocalMemory V2 installed at ~/.claude-memory/"
 attribution:

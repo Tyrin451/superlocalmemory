@@ -47,7 +47,7 @@ TTL_SECONDS: int = 120
 CLEANUP_HORIZON_SECONDS: int = 600
 MAX_BYTES: int = 50 * 1024 * 1024
 MAX_CONTENT_CHARS: int = 4000
-SCHEMA_VERSION: str = "3.4.22"
+SCHEMA_VERSION: str = "3.4.23"
 
 _HMAC_MATERIAL: bytes = b"active_brain_cache"
 _HMAC_HEX_LEN: int = 32

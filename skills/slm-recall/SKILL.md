@@ -1,7 +1,7 @@
 ---
 name: slm-recall
 description: Search SuperLocalMemory for relevant facts, decisions, and past context. Use when the user asks to recall, search, find, or retrieve stored information. Invokes 5-channel retrieval with LightGBM reranking via MCP.
-version: "3.4.22"
+version: "3.4.23"
 license: AGPL-3.0-or-later
 compatibility: "SuperLocalMemory v3.4.22 — MCP (preferred) or CLI fallback"
 attribution:

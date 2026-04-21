@@ -1,7 +1,7 @@
 ---
 name: slm-status
 description: Check SuperLocalMemory system status, health, and statistics. Use when the user wants to know memory count, graph stats, patterns learned, database health, or system diagnostics. Shows comprehensive system health dashboard.
-version: "3.4.22"
+version: "3.4.23"
 license: AGPL-3.0-or-later
 compatibility: "Requires SuperLocalMemory V2 installed at ~/.claude-memory/"
 attribution:

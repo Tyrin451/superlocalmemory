@@ -1,7 +1,7 @@
 ---
 name: slm-remember
 description: Save content to SuperLocalMemory with intelligent indexing and knowledge graph integration. Use when the user wants to remember information, save context, store coding decisions, or persist knowledge for future sessions. Automatically indexes, graphs, and learns patterns.
-version: "3.4.22"
+version: "3.4.23"
 license: AGPL-3.0-or-later
 compatibility: "Requires SuperLocalMemory V2 installed at ~/.claude-memory/"
 attribution:

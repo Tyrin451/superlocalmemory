@@ -395,7 +395,7 @@ class LearningDatabase:
         feature_names: list[str],
         trained_on_count: int,
         metrics: dict,
-        model_version: str = "3.4.22",
+        model_version: str = "3.4.23",
     ) -> int:
         """Persist a newly trained model and flip the active flag.
 

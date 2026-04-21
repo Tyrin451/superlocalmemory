@@ -4,6 +4,97 @@
 // Data originates from our own trusted local SQLite database (localhost only).
 
 // ============================================================================
+// v3.4.23 — slmFetch(): fetch with 15s abort timeout
+// ----------------------------------------------------------------------------
+// Bare fetch() never resolves when the daemon dies mid-request (socket kept
+// open, Promise pending). That leaves dashboard spinners running forever and
+// stacks up orphan fetches that make hard-refresh hang. slmFetch wraps every
+// request in an AbortController with a 15 s ceiling, so a dead daemon
+// surfaces as a normal rejection and the UI can show a clear error.
+// ============================================================================
+
+window.SLM_FETCH_TIMEOUT_MS = 15000;
+
+// Global fetch patch: apply the abort timeout to every relative-URL request
+// automatically. 17 UI modules call bare fetch() — patching here avoids
+// touching each one and guarantees no future callsite can regress to an
+// un-timed fetch that holds the spinner forever. Absolute URLs (external
+// resources) are passed through unchanged. Callers that already supply
+// `signal` keep their own behavior. `init.timeoutMs` lets callers override
+// the default per-request.
+(function patchFetch() {
+    if (window.__slmFetchPatched) return;
+    window.__slmFetchPatched = true;
+    var _origFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+        init = init || {};
+        var urlStr = typeof input === 'string' ? input : (input && input.url) || '';
+        var isRelative = !(/^https?:\/\//i.test(urlStr));
+        if (!isRelative || init.signal) {
+            return _origFetch(input, init);
+        }
+        var controller = new AbortController();
+        var timeoutMs = init.timeoutMs || window.SLM_FETCH_TIMEOUT_MS;
+        var timer = setTimeout(function () { controller.abort(); }, timeoutMs);
+        init.signal = controller.signal;
+        return _origFetch(input, init).finally(function () { clearTimeout(timer); });
+    };
+})();
+
+// Thin named wrapper for callsites that want explicit timeout control.
+// Equivalent to the patched fetch above but accepts `init.timeoutMs`.
+async function slmFetch(input, init) {
+    return fetch(input, init || {});
+}
+
+// ============================================================================
+// v3.4.23 — version fingerprint + auto-reload on daemon upgrade
+// ----------------------------------------------------------------------------
+// index.html ships with <meta name="slm-version" content="__SLM_VERSION__">
+// that the server fills in at serve time. After page load we ask the daemon
+// for its current version via /api/version; on mismatch we clear localStorage
+// and hard-reload once, so a stale tab never lingers after `slm restart` or
+// a package upgrade. Guarded by sessionStorage to avoid reload loops.
+// ============================================================================
+
+async function checkVersionFingerprint() {
+    try {
+        var metaEl = document.querySelector('meta[name="slm-version"]');
+        var pageVersion = metaEl ? metaEl.getAttribute('content') : null;
+        if (!pageVersion || pageVersion === '__SLM_VERSION__') return;
+        var resp = await slmFetch('/api/version', { timeoutMs: 5000 });
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var serverVersion = data && data.version;
+        if (!serverVersion || serverVersion === pageVersion) return;
+        try {
+            if (sessionStorage.getItem('slm-version-reload-done') === serverVersion) {
+                console.warn('[slm] version mismatch persists after reload:',
+                    pageVersion, '!=', serverVersion);
+                return;
+            }
+            sessionStorage.setItem('slm-version-reload-done', serverVersion);
+        } catch (e) {
+            // sessionStorage blocked (private mode, quota, etc.) — fall through
+            // to reload. Worst case: we reload twice instead of once, still
+            // safe because server version converges on second attempt.
+        }
+        try {
+            // Preserve theme; drop everything else that might be stale.
+            var theme = localStorage.getItem('slm-theme');
+            localStorage.clear();
+            if (theme) localStorage.setItem('slm-theme', theme);
+        } catch (e) { /* localStorage may be blocked */ }
+        console.info('[slm] daemon upgraded', pageVersion, '->', serverVersion,
+            '— reloading');
+        location.reload();
+    } catch (err) {
+        // Network error or daemon down: don't reload, just log.
+        console.debug('[slm] version check skipped:', err && err.message);
+    }
+}
+
+// ============================================================================
 // Dark Mode
 // ============================================================================
 
@@ -180,7 +271,7 @@ function formatDateFull(dateString) {
 
 async function loadStats() {
     try {
-        var response = await fetch('/api/stats');
+        var response = await slmFetch('/api/stats');
         var data = await response.json();
         var ov = data.overview || {};
         animateCounter('stat-memories', ov.total_memories || 0);
@@ -235,6 +326,10 @@ function populateFilters(categories, projects) {
 
 window.addEventListener('DOMContentLoaded', function() {
     initDarkMode();
+    // v3.4.23: version check runs first and non-blocking. If a mismatch is
+    // detected it triggers location.reload(), so the rest of init on the
+    // stale page becomes a no-op.
+    checkVersionFingerprint();
     loadProfiles();
     loadStats();
     loadGraph();

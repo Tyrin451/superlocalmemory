@@ -56,9 +56,27 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Control referrer information leakage
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
-        # Prevent caching of sensitive data (for API endpoints)
-        if request.url.path.startswith("/api/"):
+        # v3.4.23: Cache-Control strategy
+        # ---------------------------------------------------------------
+        # Three classes of paths, three policies:
+        #
+        #   /api/*        -> no-store (sensitive data, never cache)
+        #   index.html    -> no-cache, must-revalidate (always revalidate)
+        #   /static/*     -> no-cache, must-revalidate (always revalidate
+        #                    with ETag; fast reloads but never stale-after-
+        #                    upgrade)
+        #
+        # Before v3.4.23 only /api/* had cache headers. Browsers then cached
+        # JS/CSS/HTML aggressively via default heuristics, and after a daemon
+        # upgrade the dashboard showed an infinite spinner because old cached
+        # JS was calling endpoints with stale response shapes. "no-cache"
+        # (not "no-store") still allows 304s on unchanged files, so reload
+        # cost stays low.
+        path = request.url.path
+        if path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             response.headers["Pragma"] = "no-cache"
+        elif path == "/" or path.endswith(".html") or path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
 
         return response
