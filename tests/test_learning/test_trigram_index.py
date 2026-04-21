@@ -326,8 +326,9 @@ def test_lookup_fast_fail_on_db_lock(index, cache_db: Path):
         elapsed_ms = (time.perf_counter() - t0) * 1000
         # Graceful fallback: empty list.
         assert out == []
-        # Must fast-fail. 50 ms busy_timeout + 200 ms slack for CI jitter.
-        assert elapsed_ms < 250, f"lookup hung under lock: {elapsed_ms:.1f} ms"
+        # Must fast-fail, not hang. 50 ms busy_timeout + generous CI slack
+        # (macOS GitHub runners routinely hit 400-500ms under load).
+        assert elapsed_ms < 1000, f"lookup hung under lock: {elapsed_ms:.1f} ms"
     finally:
         release.set()
         t.join(timeout=2.0)
