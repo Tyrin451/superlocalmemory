@@ -35,14 +35,22 @@ _engine = None
 
 
 def get_engine():
-    """Return (or create) the singleton MemoryEngine."""
+    """Return (or create) the singleton LIGHT MemoryEngine.
+
+    The MCP server process is one per IDE. A FULL engine here would
+    load the ONNX embedder into every IDE's MCP process — that is the
+    multi-IDE RAM blast Path B is designed to prevent. Heavy work
+    (recall, store, consolidate) routes through the daemon / worker
+    subprocess via the pool adapter in mcp/_pool_adapter.py.
+    """
     global _engine
     if _engine is None:
         from superlocalmemory.core.config import SLMConfig
         from superlocalmemory.core.engine import MemoryEngine
+        from superlocalmemory.core.engine_capabilities import Capabilities
 
         config = SLMConfig.load()
-        _engine = MemoryEngine(config)
+        _engine = MemoryEngine(config, capabilities=Capabilities.LIGHT)
         _engine.initialize()
     return _engine
 
@@ -161,7 +169,12 @@ register_evolution_tools(_target, get_engine)  # v3.4.11: Skill evolution tools
 # the first tool call arrives (1-2s later), the engine is already warm.
 # This applies to ALL IDEs: Claude Code, Cursor, Antigravity, Gemini CLI, etc.
 def _eager_warmup() -> None:
-    """Pre-warm engine + ensure daemon is running + auto-register mesh (background thread)."""
+    """Pre-warm LIGHT engine + ensure daemon is running + auto-register mesh.
+
+    LIGHT engine init is cheap (DB only, ~100 ms). The real reason this
+    stays in a background thread is the follow-on side effects
+    (``ensure_daemon``, ``auto_register_mesh``) which do I/O.
+    """
     import logging
     _logger = logging.getLogger(__name__)
     try:
@@ -169,6 +182,11 @@ def _eager_warmup() -> None:
         _logger.info("MCP engine pre-warmed successfully")
     except Exception as exc:
         _logger.debug("MCP engine pre-warmup failed (non-fatal): %s", exc)
+
+    # Measurement / test harnesses set this to skip daemon-start and
+    # mesh-register. The LIGHT engine init above still runs.
+    if _os.environ.get("SLM_DISABLE_WARMUP_SIDE_EFFECTS") == "1":
+        return
 
     # V3.4.4: Also ensure daemon is running for dashboard/mesh/health features.
     # This runs in background — doesn't block MCP tool registration.
