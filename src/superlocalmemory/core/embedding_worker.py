@@ -66,6 +66,9 @@ def _load_embedding_model(name: str) -> tuple:
     # Tier 1: ONNX (stable memory, ~200MB footprint)
     try:
         m = SentenceTransformer(name, backend="onnx", trust_remote_code=True)
+        # V3.4.24: Verify model works — BAAI/bge-m3 fails with KeyError 'last_hidden_state'
+        # during first encode if default ONNX export has incompatible output names.
+        m.encode(["test"], normalize_embeddings=True)
         return m, "onnx"
     except Exception:
         pass
@@ -110,8 +113,9 @@ def _worker_main() -> None:
             _respond({"ok": True})
             continue
 
+        from superlocalmemory.core.config import DEFAULT_EMBED_MODEL
         if cmd == "load":
-            name = req.get("model_name", "nomic-ai/nomic-embed-text-v1.5")
+            name = req.get("model_name", DEFAULT_EMBED_MODEL)
             expected_dim = req.get("dimension", 768)
             model, active_backend = _load_embedding_model(name)
             if model is not None:
@@ -132,7 +136,7 @@ def _worker_main() -> None:
                 _respond({"ok": False, "error": "No texts provided"})
                 continue
             if model is None:
-                name = req.get("model_name", "nomic-ai/nomic-embed-text-v1.5")
+                name = req.get("model_name", DEFAULT_EMBED_MODEL)
                 model, active_backend = _load_embedding_model(name)
                 if model is not None:
                     dim = model.get_sentence_embedding_dimension()

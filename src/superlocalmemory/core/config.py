@@ -26,6 +26,9 @@ DEFAULT_BASE_DIR = Path.home() / ".superlocalmemory"
 DEFAULT_DB_NAME = "memory.db"
 DEFAULT_PROFILES_FILE = "profiles.json"
 
+DEFAULT_EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
+DEFAULT_EMBED_DIM = 768
+
 
 # ---------------------------------------------------------------------------
 # Embedding Config
@@ -35,8 +38,8 @@ DEFAULT_PROFILES_FILE = "profiles.json"
 class EmbeddingConfig:
     """Embedding model configuration per mode."""
 
-    model_name: str = "nomic-ai/nomic-embed-text-v1.5"
-    dimension: int = 768
+    model_name: str = DEFAULT_EMBED_MODEL
+    dimension: int = DEFAULT_EMBED_DIM
     # Provider: "" = auto-detect, "sentence-transformers", "ollama", "cloud",
     # "openai" (V3.4.24: any OpenAI-compatible /v1/embeddings endpoint)
     provider: str = ""
@@ -809,16 +812,16 @@ class SLMConfig:
             _a_provider = embedding_provider or "sentence-transformers"
             if _a_provider == "openai" and embedding_endpoint:
                 _a_emb = EmbeddingConfig(
-                    model_name=embedding_model_name or "nomic-ai/nomic-embed-text-v1.5",
-                    dimension=embedding_dimension or 768,
+                    model_name=embedding_model_name or DEFAULT_EMBED_MODEL,
+                    dimension=embedding_dimension or DEFAULT_EMBED_DIM,
                     provider="openai",
                     api_endpoint=embedding_endpoint,
                     api_key=embedding_key,
                 )
             else:
                 _a_emb = EmbeddingConfig(
-                    model_name="nomic-ai/nomic-embed-text-v1.5",
-                    dimension=768,
+                    model_name=embedding_model_name or DEFAULT_EMBED_MODEL,
+                    dimension=embedding_dimension or DEFAULT_EMBED_DIM,
                     provider=_a_provider,
                 )
             return cls(
@@ -845,16 +848,16 @@ class SLMConfig:
             _b_provider = embedding_provider or "ollama"
             if _b_provider == "openai" and embedding_endpoint:
                 _b_emb = EmbeddingConfig(
-                    model_name=embedding_model_name or "nomic-ai/nomic-embed-text-v1.5",
-                    dimension=embedding_dimension or 768,
+                    model_name=embedding_model_name or DEFAULT_EMBED_MODEL,
+                    dimension=embedding_dimension or DEFAULT_EMBED_DIM,
                     provider="openai",
                     api_endpoint=embedding_endpoint,
                     api_key=embedding_key,
                 )
             else:
                 _b_emb = EmbeddingConfig(
-                    model_name="nomic-ai/nomic-embed-text-v1.5",
-                    dimension=768,
+                    model_name=embedding_model_name or DEFAULT_EMBED_MODEL,
+                    dimension=embedding_dimension or DEFAULT_EMBED_DIM,
                     provider=_b_provider,
                 )
             return cls(
@@ -889,8 +892,8 @@ class SLMConfig:
             )
         else:
             _c_emb = EmbeddingConfig(
-                model_name="text-embedding-3-large",
-                dimension=3072,
+                model_name=embedding_model_name or "text-embedding-3-large",
+                dimension=embedding_dimension or 3072,
                 api_endpoint=embedding_endpoint,
                 api_key=embedding_key,
                 deployment_name=embedding_deployment,

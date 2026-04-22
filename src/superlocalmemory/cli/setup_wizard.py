@@ -30,7 +30,6 @@ from pathlib import Path
 
 _SLM_HOME = Path(os.environ.get("SL_MEMORY_PATH", Path.home() / ".superlocalmemory"))
 _SETUP_MARKER = _SLM_HOME / ".setup-complete"
-_EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 _RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
 
 
@@ -321,8 +320,19 @@ def run_wizard(auto: bool = False) -> None:
     from superlocalmemory.core.config import SLMConfig
     from superlocalmemory.storage.models import Mode
 
+    # Load existing config to preserve custom embeddings if already set
+    current = SLMConfig.load()
+
     mode_map = {"a": Mode.A, "b": Mode.B, "c": Mode.C}
-    config = SLMConfig.for_mode(mode_map[choice])
+    config = SLMConfig.for_mode(
+        mode_map[choice],
+        embedding_model_name=current.embedding.model_name,
+        embedding_dimension=current.embedding.dimension,
+        embedding_provider=current.embedding.provider,
+        embedding_endpoint=current.embedding.api_endpoint,
+        embedding_key=current.embedding.api_key,
+        embedding_deployment=current.embedding.deployment_name,
+    )
 
     if choice == "b":
         print()
@@ -381,7 +391,7 @@ def run_wizard(auto: bool = False) -> None:
         print("  ⚠ Skipped (sentence-transformers not installed)")
         print("    Models will download on first use.")
     else:
-        embed_ok = _download_model(_EMBED_MODEL, "Embedding model")
+        embed_ok = _download_model(config.embedding.model_name, "Embedding model")
         if not embed_ok:
             print("  ⚠ Model will download on first use (may take a few minutes)")
 

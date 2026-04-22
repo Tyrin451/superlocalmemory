@@ -1675,10 +1675,13 @@ def cmd_warmup(_args: Namespace) -> None:
     """Pre-download the embedding model so first use is instant."""
     import superlocalmemory.core.embeddings as _emb_mod
 
+    from superlocalmemory.core.config import SLMConfig
+    config = SLMConfig.load()
+
     print("SuperLocalMemory V3 — Embedding Model Warmup")
     print("=" * 50)
     print(f"  Python: {sys.executable}")
-    print(f"  Model:  nomic-ai/nomic-embed-text-v1.5 (~500MB)")
+    print(f"  Model:  {config.embedding.model_name}")
     print()
 
     # Increase timeout for first-time download
@@ -1686,13 +1689,10 @@ def cmd_warmup(_args: Namespace) -> None:
     _emb_mod._SUBPROCESS_RESPONSE_TIMEOUT = 180  # 3 min for cold start
 
     try:
-        from superlocalmemory.core.config import EmbeddingConfig
         from superlocalmemory.core.embeddings import EmbeddingService
 
-        config = EmbeddingConfig()
-
         print("Step 1/3: Spawning embedding worker subprocess...")
-        svc = EmbeddingService(config)
+        svc = EmbeddingService(config.embedding)
 
         if not svc.is_available:
             print("\n[FAIL] Embedding service not available.")
@@ -1702,9 +1702,9 @@ def cmd_warmup(_args: Namespace) -> None:
         print("Step 2/3: Loading model (may download ~500MB on first run)...")
         emb = svc.embed("warmup test")
 
-        if emb and len(emb) == config.dimension:
+        if emb and len(emb) == config.embedding.dimension:
             print("Step 3/3: Verifying embedding output...")
-            print(f"\n[PASS] Model ready: {config.model_name} ({config.dimension}-dim)")
+            print(f"\n[PASS] Model ready: {config.embedding.model_name} ({config.embedding.dimension}-dim)")
             print("Semantic search is fully operational.")
         else:
             print("\n[FAIL] Model loaded but embedding verification failed.")
@@ -1722,13 +1722,14 @@ def cmd_warmup(_args: Namespace) -> None:
 
 def _warmup_diagnose() -> None:
     """Diagnostic helper when warmup fails."""
+    from superlocalmemory.core.config import DEFAULT_EMBED_MODEL
     print("\nDiagnosing...")
     print(f"  Python executable: {sys.executable}")
     try:
         from sentence_transformers import SentenceTransformer
         print("  sentence-transformers: importable")
         m = SentenceTransformer(
-            "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True, device="cpu",
+            DEFAULT_EMBED_MODEL, trust_remote_code=True, device="cpu",
         )
         v = m.encode(["test"], normalize_embeddings=True)
         print(f"  Direct embed: OK (dim={v.shape[1]})")
