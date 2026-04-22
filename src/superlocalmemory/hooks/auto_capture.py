@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +41,25 @@ class CaptureDecision:
 
 
 class AutoCapture:
-    """Detect and classify content for automatic storage."""
+    """Detect and classify content for automatic storage.
 
-    def __init__(self, engine=None, config: dict | None = None):
+    Two ways to wire the store side:
+
+    - Pass ``engine=<MemoryEngine>`` (CLI/daemon path — historical shape).
+    - Pass ``store_fn=<callable>`` (MCP/LIGHT path — the callable should
+      match ``MemoryEngine.store(content, metadata=...)`` and return a
+      list of fact ids). When both are supplied, ``store_fn`` wins.
+    """
+
+    def __init__(
+        self,
+        engine=None,
+        config: dict | None = None,
+        *,
+        store_fn: Callable[..., Any] | None = None,
+    ):
         self._engine = engine
+        self._store_fn = store_fn
         self._config = config or {}
         self._enabled = self._config.get("enabled", True)
         self._min_confidence = self._config.get("min_confidence", 0.5)
@@ -85,15 +100,18 @@ class AutoCapture:
         return CaptureDecision(False, 0.0, "none", "no patterns matched")
 
     def capture(self, content: str, category: str = "", metadata: dict | None = None) -> bool:
-        """Store content via engine if auto-capture decides to."""
-        if not self._engine:
+        """Store content via engine or store_fn if auto-capture decides to."""
+        if self._store_fn is None and self._engine is None:
             return False
 
         try:
             meta = metadata or {}
             meta["source"] = "auto-capture"
             meta["category"] = category
-            fact_ids = self._engine.store(content, metadata=meta)
+            if self._store_fn is not None:
+                fact_ids = self._store_fn(content, metadata=meta)
+            else:
+                fact_ids = self._engine.store(content, metadata=meta)
             return len(fact_ids) > 0
         except Exception as exc:
             logger.debug("Auto-capture store failed: %s", exc)

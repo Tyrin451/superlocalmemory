@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +17,35 @@ class AutoRecall:
 
     Called at session start or before each prompt to inject
     relevant memories without user intervention.
+
+    Two ways to wire the recall side:
+
+    - Pass ``engine=<MemoryEngine>`` (CLI/daemon path — historical shape).
+    - Pass ``recall_fn=<callable>`` (MCP/LIGHT path — the callable adapts
+      a worker-pool call to the ``RecallResponse``-shaped return value).
+      When both are supplied, ``recall_fn`` wins.
     """
 
-    def __init__(self, engine=None, config: dict | None = None):
+    def __init__(
+        self,
+        engine=None,
+        config: dict | None = None,
+        *,
+        recall_fn: Callable[..., Any] | None = None,
+    ):
         self._engine = engine
+        self._recall_fn = recall_fn
         self._config = config or {}
         self._enabled = self._config.get("enabled", True)
         self._max_memories = self._config.get("max_memories_injected", 10)
         self._threshold = self._config.get("relevance_threshold", 0.3)
+
+    def _recall(self, query: str, limit: int):
+        if self._recall_fn is not None:
+            return self._recall_fn(query, limit=limit)
+        if self._engine is not None:
+            return self._engine.recall(query, limit=limit)
+        return None
 
     def get_session_context(self, project_path: str = "", query: str = "") -> str:
         """Get relevant context for a session or query.
@@ -32,15 +53,17 @@ class AutoRecall:
         Returns a formatted string of relevant memories suitable
         for injection into an AI's system prompt.
         """
-        if not self._enabled or not self._engine:
+        if not self._enabled:
+            return ""
+        if self._recall_fn is None and self._engine is None:
             return ""
 
         try:
             # Build query from project path or explicit query
             search_query = query or f"project context {project_path}"
-            response = self._engine.recall(search_query, limit=self._max_memories)
+            response = self._recall(search_query, self._max_memories)
 
-            if not response.results:
+            if response is None or not response.results:
                 return ""
 
             # Filter by relevance threshold
@@ -64,11 +87,15 @@ class AutoRecall:
 
         Returns structured data (not formatted string) for MCP tools.
         """
-        if not self._enabled or not self._engine:
+        if not self._enabled:
+            return []
+        if self._recall_fn is None and self._engine is None:
             return []
 
         try:
-            response = self._engine.recall(query, limit=self._max_memories)
+            response = self._recall(query, self._max_memories)
+            if response is None:
+                return []
             results = []
             for r in response.results:
                 if r.score >= self._threshold:
