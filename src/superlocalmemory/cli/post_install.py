@@ -21,6 +21,21 @@ def run_post_install():
     print("=" * 30)
     print()
 
+    # Upgrade banner — fires when a prior-version user runs
+    # ``npm install -g superlocalmemory@latest``. Silent on fresh
+    # installs (setup wizard handles welcome).
+    try:
+        from superlocalmemory import __version__ as _slm_ver
+        from superlocalmemory.cli.version_banner import (
+            check_and_emit_upgrade_banner,
+        )
+        if check_and_emit_upgrade_banner(_slm_ver):
+            # Upgrade detected — the banner already covered it;
+            # skip the V2 path + fresh-install copy and return.
+            return
+    except Exception:
+        pass
+
     # Step 1: Check for V2 installation
     from superlocalmemory.storage.v2_migrator import V2Migrator
 

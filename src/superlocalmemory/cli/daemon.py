@@ -627,6 +627,15 @@ def start_server(port: int = _DEFAULT_PORT, idle_timeout: int | None = None) -> 
         "SLM_DAEMON_IDLE_TIMEOUT", str(_DEFAULT_IDLE_TIMEOUT),
     ))
 
+    # One-time post-upgrade banner on daemon start (same marker the CLI
+    # checks — whichever runs first wins).
+    try:
+        from superlocalmemory import __version__ as _slm_ver
+        from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
+        check_and_emit_upgrade_banner(_slm_ver)
+    except Exception:
+        pass
+
     # Write PID + port files
     _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     _PID_FILE.write_text(str(os.getpid()))

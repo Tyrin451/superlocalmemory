@@ -79,6 +79,11 @@ def main() -> None:
     from superlocalmemory.cli.json_output import _get_version
     _ver = _get_version()
 
+    # One-time post-upgrade banner — silent for fresh installs and
+    # same-version runs. Guarded against I/O errors internally.
+    from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
+    check_and_emit_upgrade_banner(_ver)
+
     parser = argparse.ArgumentParser(
         prog="slm",
         description=f"SuperLocalMemory V3 ({_ver}) — AI agent memory with mathematical foundations",
