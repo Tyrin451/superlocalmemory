@@ -636,6 +636,18 @@ def start_server(port: int = _DEFAULT_PORT, idle_timeout: int | None = None) -> 
     except Exception:
         pass
 
+    # Apply the v3.4.26 data-dir migration now — the daemon is the
+    # authoritative holder of the DB, so this is the right place to do
+    # it unconditionally (``migrate`` is idempotent).
+    try:
+        from pathlib import Path as _P
+        from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import migrate as _migrate
+        _data = _P(os.environ.get("SLM_DATA_DIR")
+                   or _P.home() / ".superlocalmemory")
+        _migrate(_data)
+    except Exception as exc:
+        logger.warning("v3.4.26 migration on daemon start failed: %s", exc)
+
     # Write PID + port files
     _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     _PID_FILE.write_text(str(os.getpid()))

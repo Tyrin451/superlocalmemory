@@ -82,7 +82,25 @@ def main() -> None:
     # One-time post-upgrade banner — silent for fresh installs and
     # same-version runs. Guarded against I/O errors internally.
     from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
-    check_and_emit_upgrade_banner(_ver)
+    if check_and_emit_upgrade_banner(_ver):
+        # First post-upgrade invocation: apply the data-dir migration if
+        # it's safe. When the previous-version daemon is still running
+        # we defer — the next daemon start picks it up.
+        try:
+            from pathlib import Path as _P
+            from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
+                migrate_if_safe as _migrate_if_safe,
+            )
+            _data = _P(_os.environ.get("SLM_DATA_DIR")
+                       or _P.home() / ".superlocalmemory")
+            _res = _migrate_if_safe(_data)
+            if _res.get("status") == "deferred":
+                print(
+                    "  note: data migration deferred — the running SLM "
+                    "daemon will apply it on its next restart."
+                )
+        except Exception:
+            pass
 
     parser = argparse.ArgumentParser(
         prog="slm",

@@ -12,6 +12,49 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def _daemon_running() -> bool:
+    """Return True if an SLM daemon is holding the data dir.
+
+    Defined as a module-level indirection so tests can monkey-patch it
+    without reaching into ``cli.daemon``.
+    """
+    from superlocalmemory.cli.daemon import is_daemon_running
+    return bool(is_daemon_running())
+
+
+def migrate_if_safe(data_dir: Path) -> dict[str, object]:
+    """Run :func:`migrate` only when it's safe to touch the data dir.
+
+    If a live daemon is detected (v3.4.25 still running during ``pip
+    install -U``), the migration is deferred and the next daemon start
+    will apply it. If the daemon probe fails we err on the safe side
+    and also defer — we never crash the user's upgrade.
+
+    Returns a dict with a ``status`` in ``{applied, already_applied,
+    deferred}``.
+    """
+    data_dir = Path(data_dir)
+
+    if is_ready(data_dir):
+        return {"status": "already_applied", "data_dir": str(data_dir)}
+
+    try:
+        daemon_up = _daemon_running()
+    except Exception:
+        daemon_up = True  # err on the safe side
+
+    if daemon_up:
+        return {
+            "status": "deferred",
+            "data_dir": str(data_dir),
+            "reason": "daemon is running — migration will apply on next daemon start",
+        }
+
+    result = migrate(data_dir)
+    result["status"] = "applied"
+    return result
+
+
 def migrate(data_dir: Path) -> dict[str, object]:
     """Prepare v3.4.26 data directory. Safe to run any number of times.
 
