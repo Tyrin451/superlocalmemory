@@ -1440,19 +1440,33 @@ def cmd_doctor(args: Namespace) -> None:
                 "TOKENIZERS_PARALLELISM": "false",
                 "TORCH_DEVICE": "cpu",
             }
+            from superlocalmemory.core.platform_utils import popen_platform_kwargs
             proc = _sp.Popen(
                 [sys.executable, "-m",
                  "superlocalmemory.core.embedding_worker"],
                 stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
                 text=True, bufsize=1, env=env,
+                **popen_platform_kwargs(),
             )
             proc.stdin.write(_json.dumps({"cmd": "ping"}) + "\n")
             proc.stdin.flush()
 
-            import select as _sel
-            ready, _, _ = _sel.select([proc.stdout], [], [], 30)
-            if ready:
-                resp = _json.loads(proc.stdout.readline())
+            import threading as _th
+            def _readline_with_timeout(stream, timeout):
+                result = []
+                def _read():
+                    try:
+                        result.append(stream.readline())
+                    except Exception:
+                        pass
+                t = _th.Thread(target=_read, daemon=True)
+                t.start()
+                t.join(timeout=timeout)
+                return result[0] if result else None
+
+            resp_line = _readline_with_timeout(proc.stdout, 30)
+            if resp_line:
+                resp = _json.loads(resp_line)
                 if resp.get("ok"):
                     _check(
                         "Embedding worker", "PASS",
