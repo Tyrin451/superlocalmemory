@@ -640,17 +640,16 @@ _server_start_time = time.monotonic()
 
 def _shutdown_server() -> None:
     global _engine, _server
-    # V3.3.28: Flush any buffered observations before shutdown
     try:
         _flush_observe_buffer()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("flush observe buffer on shutdown failed: %s", exc)
     time.sleep(0.5)
     if _engine is not None:
         try:
             _engine.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("engine close on shutdown failed: %s", exc)
         _engine = None
     if _server is not None:
         _server.shutdown()
@@ -678,24 +677,27 @@ def start_server(port: int = _DEFAULT_PORT, idle_timeout: int | None = None) -> 
         "SLM_DAEMON_IDLE_TIMEOUT", str(_DEFAULT_IDLE_TIMEOUT),
     ))
 
-    # One-time post-upgrade banner on daemon start (same marker the CLI
-    # checks — whichever runs first wins).
+    # Banner is advisory — a broken data dir must never prevent the daemon
+    # from starting, so the swallow here is intentional.
     try:
         from superlocalmemory import __version__ as _slm_ver
         from superlocalmemory.cli.version_banner import check_and_emit_upgrade_banner
         check_and_emit_upgrade_banner(_slm_ver)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("upgrade banner on daemon start failed: %s", exc)
 
     # Apply the v3.4.26 data-dir migration now — the daemon is the
     # authoritative holder of the DB, so this is the right place to do
     # it unconditionally (``migrate`` is idempotent).
     try:
         from pathlib import Path as _P
-        from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import migrate as _migrate
+        from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
+            is_ready as _is_ready, migrate as _migrate,
+        )
         _data = _P(os.environ.get("SLM_DATA_DIR")
                    or _P.home() / ".superlocalmemory")
-        _migrate(_data)
+        if not _is_ready(_data):
+            _migrate(_data)
     except Exception as exc:
         logger.warning("v3.4.26 migration on daemon start failed: %s", exc)
 

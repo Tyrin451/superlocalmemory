@@ -306,6 +306,12 @@ class RecallQueue:
                 "AND completed = 0 AND cancelled = 0 AND dead_letter = 0",
                 (result_json, request_id, received),
             )
+            if cur.rowcount == 0:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "fenced out: request_id=%s received=%d (stale or already terminal)",
+                    request_id, received,
+                )
             return cur.rowcount
 
     def mark_dead_letter(self, request_id: str, *, reason: str) -> None:

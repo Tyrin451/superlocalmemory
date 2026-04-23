@@ -131,6 +131,9 @@ def check_and_emit_upgrade_banner(current: str) -> bool:
     Returns True if the banner was emitted on this call, else False.
     Never raises — swallows I/O errors so a broken data directory cannot
     take down the CLI.
+
+    Concurrent CLI + daemon + npm-postinstall callers serialize through
+    an O_CREAT|O_EXCL lock file so at most one emits the banner.
     """
     try:
         prior = read_marker_version()
@@ -145,10 +148,36 @@ def check_and_emit_upgrade_banner(current: str) -> bool:
             write_marker_version(current)
             return False
 
-        sys.stdout.write(_banner(prior, current))
-        sys.stdout.flush()
-        write_marker_version(current)
-        return True
+        # Serialize concurrent emitters via O_CREAT|O_EXCL lock file.
+        lock = _data_dir() / ".version-banner.lock"
+        lock_fd = None
+        try:
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            lock_fd = os.open(
+                str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600,
+            )
+        except FileExistsError:
+            return False
+        except OSError:
+            pass
+
+        try:
+            # Re-check after winning the lock — the loser may have
+            # already written the marker while we raced.
+            if read_marker_version() == current:
+                return False
+
+            sys.stdout.write(_banner(prior, current))
+            sys.stdout.flush()
+            write_marker_version(current)
+            return True
+        finally:
+            if lock_fd is not None:
+                os.close(lock_fd)
+            try:
+                lock.unlink(missing_ok=True)
+            except OSError:
+                pass
     except Exception:
         # Banner is advisory. A failure here must never propagate.
         return False

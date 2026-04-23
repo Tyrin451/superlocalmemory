@@ -7,6 +7,7 @@ serving session_init / observe / session_context correctly.
 """
 from __future__ import annotations
 
+import pytest
 from types import SimpleNamespace
 
 
@@ -80,6 +81,44 @@ class TestPoolAdapter:
         monkeypatch.setattr(_pool_adapter, "_pool", lambda: _Empty())
         resp = _pool_adapter.pool_recall("nothing")
         assert resp.results == []
+
+    def test_pool_recall_raises_on_ok_false(self, monkeypatch):
+        """Worker death returns {"ok": False} — must raise PoolError,
+        not silently return empty results."""
+        from superlocalmemory.mcp import _pool_adapter
+        from superlocalmemory.mcp._pool_adapter import PoolError
+
+        class _Dead:
+            def recall(self, query, limit=10, session_id=""):
+                return {"ok": False, "error": "worker died"}
+
+        monkeypatch.setattr(_pool_adapter, "_pool", lambda: _Dead())
+        with pytest.raises(PoolError, match="worker died"):
+            _pool_adapter.pool_recall("anything")
+
+    def test_pool_store_raises_on_ok_false(self, monkeypatch):
+        from superlocalmemory.mcp import _pool_adapter
+        from superlocalmemory.mcp._pool_adapter import PoolError
+
+        class _Dead:
+            def store(self, content, metadata=None):
+                return {"ok": False, "error": "write failed"}
+
+        monkeypatch.setattr(_pool_adapter, "_pool", lambda: _Dead())
+        with pytest.raises(PoolError, match="write failed"):
+            _pool_adapter.pool_store("test content")
+
+    def test_pool_recall_returns_typed_dataclass(self, monkeypatch):
+        from superlocalmemory.mcp import _pool_adapter
+        from superlocalmemory.mcp._pool_adapter import (
+            PoolRecallResponse, PoolRecallItem, PoolFact,
+        )
+        fake = _FakePool()
+        monkeypatch.setattr(_pool_adapter, "_pool", lambda: fake)
+        resp = _pool_adapter.pool_recall("typed check")
+        assert isinstance(resp, PoolRecallResponse)
+        assert isinstance(resp.results[0], PoolRecallItem)
+        assert isinstance(resp.results[0].fact, PoolFact)
 
     def test_pool_recall_integrates_with_auto_recall(self, monkeypatch):
         """End-to-end: AutoRecall with recall_fn=pool_recall returns context."""

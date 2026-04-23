@@ -100,6 +100,17 @@ class TestFullEngineDefault:
         assert response is not None
 
 
+class TestCapabilitiesEnum:
+    def test_pickling_roundtrips(self):
+        import pickle
+        for cap in Capabilities:
+            assert pickle.loads(pickle.dumps(cap)) is cap
+
+    def test_value_strings(self):
+        assert Capabilities.LIGHT.value == "light"
+        assert Capabilities.FULL.value == "full"
+
+
 class TestLightEngineDBOnlyFeatures:
     """LIGHT must still serve DB-only features so user-facing feedback,
     learning-status, and session_init phase counters keep working in MCP."""

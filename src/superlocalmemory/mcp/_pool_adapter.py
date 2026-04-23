@@ -15,10 +15,36 @@ death must be distinguishable from "no memories" on the user side.
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
+from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PoolFact:
+    fact_id: str = ""
+    content: str = ""
+    memory_id: str = ""
+
+
+@dataclass(frozen=True)
+class PoolRecallItem:
+    fact: PoolFact = field(default_factory=PoolFact)
+    score: float = 0.0
+    confidence: float = 0.0
+    trust_score: float = 0.0
+    channel_scores: dict[str, float] = field(default_factory=dict)
+    evidence_chain: list[Any] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PoolRecallResponse:
+    results: list[PoolRecallItem] = field(default_factory=list)
+    query_type: str = ""
+    retrieval_time_ms: float = 0.0
+    channel_weights: dict[str, float] = field(default_factory=dict)
+    total_candidates: int = 0
 
 
 class PoolError(RuntimeError):
@@ -48,8 +74,8 @@ def _unwrap_error(raw: Any, op: str) -> None:
         raise PoolError(f"pool.{op} failed: {reason}")
 
 
-def pool_recall(query: str, limit: int = 10, **_: Any) -> SimpleNamespace:
-    """Call pool.recall and reshape its dict into a RecallResponse-like object.
+def pool_recall(query: str, limit: int = 10, **_: Any) -> PoolRecallResponse:
+    """Call pool.recall and reshape its dict into a typed response.
 
     Raises :class:`PoolError` on worker death or any non-ok envelope.
     """
@@ -57,8 +83,8 @@ def pool_recall(query: str, limit: int = 10, **_: Any) -> SimpleNamespace:
     _unwrap_error(raw, "recall")
     items = raw.get("results", []) if isinstance(raw, dict) else []
     results = [
-        SimpleNamespace(
-            fact=SimpleNamespace(
+        PoolRecallItem(
+            fact=PoolFact(
                 fact_id=item.get("fact_id", ""),
                 content=item.get("content", ""),
                 memory_id=item.get("memory_id", ""),
@@ -71,7 +97,7 @@ def pool_recall(query: str, limit: int = 10, **_: Any) -> SimpleNamespace:
         )
         for item in items
     ]
-    return SimpleNamespace(
+    return PoolRecallResponse(
         results=results,
         query_type=raw.get("query_type", "") if isinstance(raw, dict) else "",
         retrieval_time_ms=float(raw.get("retrieval_time_ms", 0.0))

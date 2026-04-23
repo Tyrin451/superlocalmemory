@@ -139,6 +139,17 @@ class TestSecurityHardening:
         assert write_marker_version("3.4.26\x1b[31m") is False
 
 
+class TestBannerOutput:
+    """Banner output goes to stdout, not stderr."""
+
+    def test_banner_goes_to_stdout_not_stderr(self, slm_home, capsys):
+        (slm_home / "memory.db").write_bytes(b"SQLite format 3\x00")
+        check_and_emit_upgrade_banner(current="3.4.30")
+        captured = capsys.readouterr()
+        assert captured.out, "banner must write to stdout"
+        assert captured.err == "", "banner must not write to stderr"
+
+
 class TestIdempotencyAndFailureMode:
     def test_read_tolerant_of_corrupt_marker(self, slm_home):
         marker = slm_home / ".version"
