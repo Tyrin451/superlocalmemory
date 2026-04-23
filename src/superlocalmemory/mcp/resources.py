@@ -200,7 +200,8 @@ def register_resources(server, get_engine: Callable) -> None:
                 from superlocalmemory.learning.behavioral import BehavioralPatternStore
                 store = BehavioralPatternStore(engine._db.db_path)
                 summary = store.get_summary(pid)
-            except Exception:
+            except Exception as exc:
+                logger.warning("learning_status behavioral summary failed: %s", exc)
                 summary = {}
 
             # Outcome stats
@@ -211,7 +212,8 @@ def register_resources(server, get_engine: Callable) -> None:
                     (pid,),
                 )
                 outcomes = {dict(r)["outcome"]: dict(r)["c"] for r in outcome_rows}
-            except Exception:
+            except Exception as exc:
+                logger.warning("learning_status outcome query failed: %s", exc)
                 outcomes = {}
 
             lines = [
@@ -245,7 +247,8 @@ def register_resources(server, get_engine: Callable) -> None:
                     (pid,),
                 )
                 activity = {dict(r)["action"]: dict(r)["c"] for r in audit_rows}
-            except Exception:
+            except Exception as exc:
+                logger.warning("engagement audit-trail query failed: %s", exc)
                 activity = {}
 
             # Top-accessed facts

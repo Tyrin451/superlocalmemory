@@ -87,6 +87,7 @@ def main() -> None:
         # it's safe. When the previous-version daemon is still running
         # we defer — the next daemon start picks it up.
         try:
+            import logging as _logging
             from pathlib import Path as _P
             from superlocalmemory.migrations.v3_4_25_to_v3_4_26 import (
                 migrate_if_safe as _migrate_if_safe,
@@ -99,8 +100,12 @@ def main() -> None:
                     "  note: data migration deferred — the running SLM "
                     "daemon will apply it on its next restart."
                 )
-        except Exception:
-            pass
+        except Exception as _mig_exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "v3.4.26 migrate_if_safe failed: %s — run `slm doctor`", _mig_exc,
+            )
+            print("  note: data migration check failed — run `slm doctor` to diagnose.")
 
     parser = argparse.ArgumentParser(
         prog="slm",

@@ -28,14 +28,18 @@ DB_PATH = MEMORY_DIR / "memory.db"
 
 def _emit_event(event_type: str, payload: dict | None = None,
                 source_agent: str = "mcp_client") -> None:  # V3.3.12: see also mcp/shared.py
-    """Emit an event to the EventBus (best-effort, never raises)."""
+    """Emit an event to the EventBus (best-effort, never raises).
+
+    Dashboard visibility is load-bearing per the v3.4.26 user contract,
+    so we log on failure rather than silently dropping the signal.
+    """
     try:
         from superlocalmemory.infra.event_bus import EventBus
         bus = EventBus.get_instance(str(DB_PATH))
         bus.emit(event_type, payload=payload, source_agent=source_agent,
                  source_protocol="mcp")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("event emit failed: type=%s err=%s", event_type, exc)
 
 
 def _register_agent(agent_id: str, profile_id: str) -> None:
@@ -45,8 +49,10 @@ def _register_agent(agent_id: str, profile_id: str) -> None:
         registry_path = MEMORY_DIR / "agents.json"
         registry = AgentRegistry(persist_path=registry_path)
         registry.register_agent(agent_id, profile_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "agent registry write failed: agent=%s err=%s", agent_id, exc,
+        )
 
 
 def register_active_tools(server, get_engine: Callable) -> None:
@@ -103,8 +109,12 @@ def register_active_tools(server, get_engine: Callable) -> None:
             feedback_count = 0
             try:
                 feedback_count = engine._adaptive_learner.get_feedback_count(pid)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Feedback count is a Dash-Core signal; a silent zero
+                # masks wiring bugs. Log so operators see the failure.
+                logger.warning(
+                    "session_init feedback_count read failed: %s", exc,
+                )
 
             # Register agent + emit event
             _register_agent("mcp_client", pid)

@@ -9,7 +9,10 @@ Part of Qualixar | Author: Varun Pratap Bhardwaj
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _daemon_running() -> bool:
@@ -40,8 +43,13 @@ def migrate_if_safe(data_dir: Path) -> dict[str, object]:
 
     try:
         daemon_up = _daemon_running()
-    except Exception:
-        daemon_up = True  # err on the safe side
+    except Exception as exc:
+        # Probe failure — we default to "daemon is up" (safer: defers
+        # the migration) but we must not hide it from operators.
+        logger.warning(
+            "daemon probe failed, deferring migrate_if_safe: %s", exc,
+        )
+        daemon_up = True
 
     if daemon_up:
         return {

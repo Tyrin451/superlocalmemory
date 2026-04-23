@@ -426,8 +426,14 @@ class MemoryEngine:
                         fact_ids=fact_ids,
                         query_id=getattr(response, "query_id", "") or "",
                     ))
-            except Exception:
-                pass
+            except Exception as _outcome_exc:
+                # Engagement-signal enqueue is non-blocking; recall
+                # correctness does not depend on it. Log so the failure
+                # is visible instead of silently losing learning signals.
+                logger.warning(
+                    "outcome-queue enqueue failed (engagement signal lost): %s",
+                    _outcome_exc,
+                )
 
         return response
 
