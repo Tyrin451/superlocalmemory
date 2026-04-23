@@ -28,6 +28,35 @@ MEMORY_DIR = Path.home() / ".superlocalmemory"
 DB_PATH = MEMORY_DIR / "memory.db"
 
 
+def _try_daemon_post(path: str, body: dict, timeout_s: float = 60.0) -> dict | None:
+    """POST to the daemon, return parsed dict or None if daemon unavailable.
+
+    Keeps heavy imports (CognitiveConsolidator, ForgettingScheduler,
+    ConsolidationWorker) out of the MCP process when a daemon is up.
+    Returns None on any failure so the caller can fall back to local
+    execution.
+    """
+    try:
+        from superlocalmemory.cli.daemon import _get_port, is_daemon_running
+        if not is_daemon_running():
+            return None
+        import json as _json
+        import urllib.request as _urq
+        port = _get_port()
+        req = _urq.Request(
+            f"http://127.0.0.1:{port}{path}",
+            data=_json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _urq.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode() or "{}"
+        return _json.loads(raw)
+    except Exception as exc:
+        logger.warning("daemon POST %s failed: %s", path, exc)
+        return None
+
+
 def _emit_event(event_type: str, payload: dict | None = None,
                 source_agent: str = "mcp_client") -> None:  # V3.3.12: see also mcp/shared.py
     """Emit an event to the EventBus (best-effort, never raises)."""
@@ -189,6 +218,26 @@ def register_v33_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             pid = profile_id or engine.profile_id
+
+            # v3.4.26: prefer the daemon's /consolidate/cognitive endpoint
+            # so the heavy CognitiveConsolidator import stays out of the
+            # MCP process. Fall back to local import only if no daemon.
+            daemon_result = _try_daemon_post(
+                "/consolidate/cognitive", {"profile_id": pid},
+            )
+            if daemon_result is not None:
+                _emit_event("ccq.consolidation_complete", {
+                    "profile_id": pid,
+                    "clusters_processed": daemon_result.get("clusters_processed", 0),
+                    "blocks_created": daemon_result.get("blocks_created", 0),
+                })
+                return {
+                    "success": True,
+                    "clusters_processed": daemon_result.get("clusters_processed", 0),
+                    "blocks_created": daemon_result.get("blocks_created", 0),
+                    "profile_id": pid,
+                    "via": "daemon",
+                }
 
             from superlocalmemory.encoding.cognitive_consolidator import (
                 CognitiveConsolidator,
@@ -381,6 +430,18 @@ def register_v33_tools(server, get_engine: Callable) -> None:
         try:
             engine = get_engine()
             pid = profile_id or engine.profile_id
+
+            # v3.4.26: prefer the daemon so ForgettingScheduler /
+            # ConsolidationWorker / EbbinghausCurve don't load inside
+            # the MCP process.
+            daemon_result = _try_daemon_post(
+                "/maintenance/run", {"profile_id": pid},
+            )
+            if daemon_result is not None:
+                daemon_result.setdefault("success", True)
+                daemon_result["via"] = "daemon"
+                return daemon_result
+
             results = {}
 
             # 1. Langevin dynamics step (lifecycle evolution)

@@ -489,16 +489,55 @@ class DaemonHandler(BaseHTTPRequestHandler):
                 response = engine.recall(
                     query, limit=limit, session_id=session_id,
                 )
-                results = [
-                    {"content": r.fact.content, "score": round(r.score, 4),
-                     "fact_type": getattr(r.fact.fact_type, 'value', str(r.fact.fact_type)),
-                     "fact_id": r.fact.fact_id}
-                    for r in response.results
-                ]
+                # Return the same field shape as recall_worker._handle_recall,
+                # so MCP processes that proxy through the daemon get recall_trace-
+                # compatible data without a second round trip.
+                memory_ids = list({
+                    r.fact.memory_id for r in response.results[:limit]
+                    if r.fact.memory_id
+                })
+                memory_map = (
+                    engine._db.get_memory_content_batch(memory_ids)
+                    if memory_ids else {}
+                )
+                results = []
+                for r in response.results[:limit]:
+                    fact_type = getattr(r.fact, "fact_type", None)
+                    lifecycle = getattr(r.fact, "lifecycle", None)
+                    results.append({
+                        "fact_id": r.fact.fact_id,
+                        "memory_id": r.fact.memory_id,
+                        "content": r.fact.content[:300],
+                        "source_content": memory_map.get(r.fact.memory_id, ""),
+                        "score": round(r.score, 4),
+                        "confidence": round(r.confidence, 4),
+                        "trust_score": round(r.trust_score, 4),
+                        "channel_scores": {
+                            k: round(v, 4)
+                            for k, v in (r.channel_scores or {}).items()
+                        },
+                        "fact_type": fact_type.value
+                            if fact_type and hasattr(fact_type, "value") else "",
+                        "lifecycle": lifecycle.value
+                            if lifecycle and hasattr(lifecycle, "value") else "",
+                        "access_count": getattr(r.fact, "access_count", 0),
+                        "evidence_chain": list(
+                            getattr(r, "evidence_chain", []) or []
+                        ),
+                    })
                 self._send_json(200, {
-                    "results": results, "count": len(results),
+                    "ok": True,
+                    "query": query,
                     "query_type": response.query_type,
+                    "result_count": len(results),
                     "retrieval_time_ms": round(response.retrieval_time_ms, 1),
+                    "channel_weights": {
+                        k: round(v, 3)
+                        for k, v in (response.channel_weights or {}).items()
+                    },
+                    "total_candidates": getattr(response, "total_candidates", 0),
+                    "results": results,
+                    "count": len(results),  # backward compat alias
                 })
             except Exception as exc:
                 self._send_json(500, {"error": str(exc)})
@@ -541,14 +580,21 @@ class DaemonHandler(BaseHTTPRequestHandler):
                 body = self._read_body()
                 content = body.get("content", "")
                 tags = body.get("tags", "")
+                extra_meta = body.get("metadata") or {}
                 if not content:
                     self._send_json(400, {"error": "content required"})
                     return
 
                 engine = _get_engine()
                 metadata = {"tags": tags} if tags else {}
+                if isinstance(extra_meta, dict):
+                    metadata.update(extra_meta)
                 fact_ids = engine.store(content, metadata=metadata)
-                self._send_json(200, {"fact_ids": fact_ids, "count": len(fact_ids)})
+                self._send_json(200, {
+                    "ok": True,
+                    "fact_ids": fact_ids,
+                    "count": len(fact_ids),
+                })
             except Exception as exc:
                 self._send_json(500, {"error": str(exc)})
             return

@@ -79,6 +79,9 @@ _ESSENTIAL_TOOLS: set[str] = {
     "list_recent", "delete_memory", "update_memory", "get_status",
     # Session lifecycle (3)
     "session_init", "observe", "close_session",
+    # Feedback / learning signals — reachable Dash-Core path for
+    # thumbs-up / pin / drift signals.
+    "report_feedback",
     # Memory management (2)
     "forget", "run_maintenance",
     # Infinite memory + learning (4)

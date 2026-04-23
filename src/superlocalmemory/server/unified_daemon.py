@@ -59,6 +59,7 @@ _PORT_FILE = Path.home() / ".superlocalmemory" / "daemon.port"
 class RememberRequest(BaseModel):
     content: str
     tags: str = ""
+    metadata: dict | None = None  # v3.4.26: pass-through from MCP pool_store
 
 
 class ObserveRequest(BaseModel):
@@ -952,23 +953,56 @@ def _register_daemon_routes(application: FastAPI) -> None:
             response = engine.recall(
                 search_query, limit=limit, session_id=effective_sid,
             )
-            results = [
-                {
-                    "content": r.fact.content,
-                    "score": round(r.score, 4),
-                    "fact_type": getattr(r.fact.fact_type, 'value', str(r.fact.fact_type)),
+            # v3.4.26: return the same field shape as recall_worker so
+            # MCP processes proxying through the daemon get recall_trace-
+            # compatible data without a second round trip.
+            memory_ids = list({
+                r.fact.memory_id for r in response.results[:limit]
+                if r.fact.memory_id
+            })
+            memory_map = (
+                engine._db.get_memory_content_batch(memory_ids)
+                if memory_ids else {}
+            )
+            results = []
+            for r in response.results[:limit]:
+                fact_type = getattr(r.fact, "fact_type", None)
+                lifecycle = getattr(r.fact, "lifecycle", None)
+                results.append({
                     "fact_id": r.fact.fact_id,
+                    "memory_id": r.fact.memory_id,
+                    "content": r.fact.content,
+                    "source_content": memory_map.get(r.fact.memory_id, ""),
+                    "score": round(r.score, 4),
+                    "confidence": round(r.confidence, 4),
+                    "trust_score": round(r.trust_score, 4),
                     "channel_scores": {
-                        k: round(v, 4) for k, v in r.channel_scores.items()
-                    } if r.channel_scores else {},
-                }
-                for r in response.results
-            ]
+                        k: round(v, 4)
+                        for k, v in (r.channel_scores or {}).items()
+                    },
+                    "fact_type": fact_type.value
+                        if fact_type and hasattr(fact_type, "value")
+                        else getattr(r.fact, "fact_type", ""),
+                    "lifecycle": lifecycle.value
+                        if lifecycle and hasattr(lifecycle, "value") else "",
+                    "access_count": getattr(r.fact, "access_count", 0),
+                    "evidence_chain": list(
+                        getattr(r, "evidence_chain", []) or []
+                    ),
+                })
             return {
+                "ok": True,
+                "query": search_query,
+                "query_type": response.query_type,
+                "result_count": len(results),
+                "retrieval_time_ms": round(response.retrieval_time_ms, 1),
+                "channel_weights": {
+                    k: round(v, 3)
+                    for k, v in (response.channel_weights or {}).items()
+                },
+                "total_candidates": getattr(response, "total_candidates", 0),
                 "results": results,
                 "count": len(results),
-                "query_type": response.query_type,
-                "retrieval_time_ms": round(response.retrieval_time_ms, 1),
             }
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
@@ -979,8 +1013,11 @@ def _register_daemon_routes(application: FastAPI) -> None:
         engine = _get_engine_or_503()
         try:
             metadata = {"tags": req.tags} if req.tags else {}
+            extra = getattr(req, "metadata", None)
+            if isinstance(extra, dict):
+                metadata.update(extra)
             fact_ids = engine.store(req.content, metadata=metadata)
-            return {"fact_ids": fact_ids, "count": len(fact_ids)}
+            return {"ok": True, "fact_ids": fact_ids, "count": len(fact_ids)}
         except Exception as exc:
             raise HTTPException(500, detail=str(exc))
 
@@ -989,6 +1026,71 @@ def _register_daemon_routes(application: FastAPI) -> None:
         _update_activity()
         result = _observe_buffer.enqueue(req.content)
         return result
+
+    # v3.4.26: CCQ consolidation via daemon so MCP clients don't need to
+    # import CognitiveConsolidator (which pulls sentence-transformers).
+    @application.post("/consolidate/cognitive")
+    async def consolidate_cognitive_endpoint(body: dict):
+        _update_activity()
+        engine = _get_engine_or_503()
+        try:
+            pid = body.get("profile_id") or engine.profile_id
+            from superlocalmemory.encoding.cognitive_consolidator import (
+                CognitiveConsolidator,
+            )
+            consolidator = CognitiveConsolidator(db=engine._db)
+            result = consolidator.run_pipeline(pid)
+            return {
+                "ok": True,
+                "profile_id": pid,
+                "clusters_processed": result.clusters_processed,
+                "blocks_created": result.blocks_created,
+            }
+        except Exception as exc:
+            raise HTTPException(500, detail=str(exc))
+
+    # v3.4.26: run_maintenance via daemon so MCP doesn't import
+    # EbbinghausCurve, ForgettingScheduler, or ConsolidationWorker.
+    @application.post("/maintenance/run")
+    async def run_maintenance_endpoint(body: dict):
+        _update_activity()
+        engine = _get_engine_or_503()
+        try:
+            pid = body.get("profile_id") or engine.profile_id
+            results: dict = {}
+            try:
+                from superlocalmemory.core.maintenance import run_maintenance as _run_maint
+                maint_result = _run_maint(engine._db, engine._config, pid)
+                results["langevin"] = {"updated": maint_result.get("updated", 0)}
+            except Exception as exc:
+                results["langevin"] = {"error": str(exc)}
+            try:
+                from superlocalmemory.math.ebbinghaus import EbbinghausCurve
+                from superlocalmemory.learning.forgetting_scheduler import (
+                    ForgettingScheduler,
+                )
+                ebb = EbbinghausCurve(engine._config.forgetting)
+                sched = ForgettingScheduler(
+                    engine._db, ebb, engine._config.forgetting,
+                )
+                results["forgetting"] = sched.run_decay_cycle(pid, force=False)
+            except Exception as exc:
+                results["forgetting"] = {"error": str(exc)}
+            try:
+                from superlocalmemory.learning.consolidation_worker import (
+                    ConsolidationWorker,
+                )
+                cw = ConsolidationWorker(
+                    engine._db.db_path,
+                    engine._db.db_path.parent / "learning.db",
+                )
+                count = cw._generate_patterns(pid, False)
+                results["behavioral"] = {"patterns_mined": count}
+            except Exception as exc:
+                results["behavioral"] = {"error": str(exc)}
+            return {"ok": True, "profile": pid, **results}
+        except Exception as exc:
+            raise HTTPException(500, detail=str(exc))
 
     @application.get("/status")
     async def status():

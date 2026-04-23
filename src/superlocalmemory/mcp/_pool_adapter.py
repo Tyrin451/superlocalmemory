@@ -2,29 +2,59 @@
 # Licensed under AGPL-3.0-or-later - see LICENSE file
 # Part of SuperLocalMemory V3 | https://qualixar.com | https://varunpratap.com
 
-"""MCP-side adapters onto :class:`WorkerPool`.
+"""MCP-side adapters onto the pool (daemon HTTP or local subprocess).
 
-The pool returns plain dicts. Hooks (``AutoRecall`` / ``AutoCapture``) and
-direct tool callers expect a ``RecallResponse``-shaped object (``.results``
-list with ``.fact.content``, ``.fact.fact_id``, ``.score``) and a list of
-fact ids. These adapters bridge the two without pulling the heavy engine
-into the MCP process.
+The pool returns plain dicts with an ``ok`` flag. Hooks
+(``AutoRecall`` / ``AutoCapture``) expect a ``RecallResponse``-shaped
+object and a list of fact ids. These adapters bridge the two.
+
+On ``{"ok": False, "error": "..."}`` the adapters raise
+:class:`PoolError` instead of silently returning empty results — worker
+death must be distinguishable from "no memories" on the user side.
 """
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
+
+class PoolError(RuntimeError):
+    """Raised when the pool returns an error envelope.
+
+    Callers that want the old silent-empty behaviour (e.g. hook paths
+    that must never break the user's session) catch this and log at
+    WARNING. Callers that want to surface the failure (e.g. dashboard
+    resources) let it propagate.
+    """
+
 
 def _pool():
-    # Imported lazily so test harnesses can patch WorkerPool.shared.
-    from superlocalmemory.core.worker_pool import WorkerPool
-    return WorkerPool.shared()
+    """Lazy pool factory — prefers the daemon HTTP proxy.
+
+    Split out so tests can monkey-patch the factory without touching
+    the real ``WorkerPool.shared()`` singleton.
+    """
+    from superlocalmemory.mcp._daemon_proxy import choose_pool
+    return choose_pool()
+
+
+def _unwrap_error(raw: Any, op: str) -> None:
+    """Raise PoolError if the pool returned an ``{"ok": False}`` envelope."""
+    if isinstance(raw, dict) and raw.get("ok") is False:
+        reason = raw.get("error") or "pool returned ok=False"
+        raise PoolError(f"pool.{op} failed: {reason}")
 
 
 def pool_recall(query: str, limit: int = 10, **_: Any) -> SimpleNamespace:
-    """Call pool.recall and reshape its dict into a RecallResponse-like object."""
+    """Call pool.recall and reshape its dict into a RecallResponse-like object.
+
+    Raises :class:`PoolError` on worker death or any non-ok envelope.
+    """
     raw = _pool().recall(query=query, limit=limit)
+    _unwrap_error(raw, "recall")
     items = raw.get("results", []) if isinstance(raw, dict) else []
     results = [
         SimpleNamespace(
@@ -37,6 +67,7 @@ def pool_recall(query: str, limit: int = 10, **_: Any) -> SimpleNamespace:
             confidence=float(item.get("confidence", 0.0)),
             trust_score=float(item.get("trust_score", 0.0)),
             channel_scores=item.get("channel_scores", {}) or {},
+            evidence_chain=list(item.get("evidence_chain", []) or []),
         )
         for item in items
     ]
@@ -45,12 +76,20 @@ def pool_recall(query: str, limit: int = 10, **_: Any) -> SimpleNamespace:
         query_type=raw.get("query_type", "") if isinstance(raw, dict) else "",
         retrieval_time_ms=float(raw.get("retrieval_time_ms", 0.0))
         if isinstance(raw, dict) else 0.0,
+        channel_weights=raw.get("channel_weights", {})
+        if isinstance(raw, dict) else {},
+        total_candidates=int(raw.get("total_candidates", 0))
+        if isinstance(raw, dict) else 0,
     )
 
 
 def pool_store(content: str, metadata: dict | None = None) -> list[str]:
-    """Call pool.store and return the fact id list."""
+    """Call pool.store and return the fact id list.
+
+    Raises :class:`PoolError` on worker death or any non-ok envelope.
+    """
     raw = _pool().store(content=content, metadata=metadata or {})
+    _unwrap_error(raw, "store")
     if isinstance(raw, dict):
         return list(raw.get("fact_ids", []))
     return []
