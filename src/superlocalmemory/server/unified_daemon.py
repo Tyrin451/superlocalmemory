@@ -888,7 +888,7 @@ def _register_dashboard_routes(application: FastAPI) -> None:
         # v3.4.23: substitute version placeholder so the dashboard can detect
         # upgrades and auto-reload. Read fresh each request (daemon uptime is
         # days, but we want zero caching surprises during development).
-        html = index_path.read_text()
+        html = index_path.read_text(encoding="utf-8")
         return html.replace("__SLM_VERSION__", _SLM_VERSION)
 
     # Startup event for event listener

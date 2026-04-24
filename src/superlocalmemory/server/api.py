@@ -214,7 +214,7 @@ def create_app() -> FastAPI:
                 "<p><a href='/docs'>API Documentation</a></p>"
                 "</body></html>"
             )
-        return index_path.read_text()
+        return index_path.read_text(encoding="utf-8")
 
     @application.get("/health")
     async def health_check():
