@@ -10,6 +10,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.35] - 2026-04-25
+
+Production auto-recall: every Claude Code prompt automatically retrieves the
+top relevant memories via the unified queue, so the agent has continuous-
+learning context without the user invoking recall manually.
+
+### Added
+- **`hooks/auto_recall_hook.py`** — production UserPromptSubmit handler.
+  Reads stdin JSON from Claude Code, detects ack prompts (silent fast path),
+  enqueues substantive prompts to `recall_queue.db`, polls for the result
+  with mode-aware timeout (A=10s, B=25s, C=40s), and injects the top-K
+  memories as Claude Code's `hookSpecificOutput.additionalContext` envelope.
+  Wraps recalled content in untrusted-boundary markers so the LLM treats
+  it as data, not instructions. Fail-open on any error.
+- **`core/queue_consumer.py`** — daemon background thread that drains
+  `recall_queue.db`. Claims jobs atomically, routes through `pool.recall()`
+  (engine never loaded in MCP/hook processes), writes results back. Priority
+  lanes (high=recall, low=consolidate). Periodic cleanup of completed rows.
+- **`slm hook auto_recall`** CLI subcommand wires Claude Code to the hook.
+- **50 new tests** — `test_queue_consumer.py` (11) + `test_auto_recall_hook.py`
+  (39). Full TDD coverage including ack detection, fencing, dedup, fail-open.
+
+### Changed
+- **`core/recall_queue.py`** — `complete()` now wrapped in `BEGIN IMMEDIATE`
+  for fencing-token atomicity under multi-process access. Dedup hash
+  includes `namespace` to prevent cross-namespace result collisions.
+- **`server/unified_daemon.py`** — starts QueueConsumer on boot, stops on
+  shutdown.
+- **`hooks/hook_handlers.py`** — dispatches `auto_recall` to the new hook.
+
+### Performance
+- p50 recall latency: 1.75s (40-prompt integration test, Mode B)
+- p99 recall latency: 11.83s
+- Hook process RSS: ~20 MB (no engine loading, no memory blast)
+- Ack prompts: 30 ms (silent, no recall)
+
+---
+
 ## [3.4.34] - 2026-04-25
 
 Fix: user's mode choice can no longer be silently overwritten.

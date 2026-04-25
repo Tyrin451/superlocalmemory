@@ -104,10 +104,10 @@ def _make_request_id() -> str:
 
 def _query_hash(
     *, session_id: str, agent_id: str, query: str, limit_n: int,
-    mode: str, tenant_id: str,
+    mode: str, tenant_id: str, namespace: str = "",
 ) -> str:
     blob = "||".join((
-        tenant_id, session_id, agent_id, mode, str(limit_n), query,
+        tenant_id, namespace, session_id, agent_id, mode, str(limit_n), query,
     )).encode("utf-8")
     return hashlib.blake2b(blob, digest_size=16).hexdigest()
 
@@ -166,6 +166,7 @@ class RecallQueue:
         qhash = _query_hash(
             session_id=session_id, agent_id=agent_id, query=query,
             limit_n=limit_n, mode=mode, tenant_id=tenant_id,
+            namespace=namespace,
         )
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
@@ -299,13 +300,19 @@ class RecallQueue:
         self, request_id: str, *, received: int, result_json: str,
     ) -> int:
         with self._lock:
-            cur = self._conn.execute(
-                "UPDATE recall_requests "
-                "SET completed = 1, result_json = ? "
-                "WHERE request_id = ? AND received = ? "
-                "AND completed = 0 AND cancelled = 0 AND dead_letter = 0",
-                (result_json, request_id, received),
-            )
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                cur = self._conn.execute(
+                    "UPDATE recall_requests "
+                    "SET completed = 1, result_json = ? "
+                    "WHERE request_id = ? AND received = ? "
+                    "AND completed = 0 AND cancelled = 0 AND dead_letter = 0",
+                    (result_json, request_id, received),
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
             if cur.rowcount == 0:
                 import logging as _log
                 _log.getLogger(__name__).warning(

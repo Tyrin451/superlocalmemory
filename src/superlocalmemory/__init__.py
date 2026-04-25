@@ -1,3 +1,3 @@
 """SuperLocalMemory — information-geometric agent memory."""
 
-__version__ = "3.4.34"
+__version__ = "3.4.35"

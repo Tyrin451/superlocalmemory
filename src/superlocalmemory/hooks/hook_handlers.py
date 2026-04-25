@@ -82,6 +82,9 @@ def handle_hook(action: str) -> None:
     if action == "stop_outcome":
         from superlocalmemory.hooks.stop_outcome_hook import main as _main
         sys.exit(_main())
+    if action == "auto_recall":
+        from superlocalmemory.hooks.auto_recall_hook import main as _main
+        sys.exit(_main())
 
     handlers = {
         "start": _hook_start,

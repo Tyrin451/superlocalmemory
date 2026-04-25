@@ -422,6 +422,27 @@ async def lifespan(application: FastAPI):
                 logger.warning("Embedding warmup failed: %s", exc)
         threading.Thread(target=_warmup_embedder, daemon=True, name="embed-warmup").start()
 
+        # v3.4.26: Start QueueConsumer — drains recall_queue.db via pool.recall().
+        # Must start AFTER WorkerPool.warmup() so the worker is ready.
+        try:
+            from pathlib import Path as _QP
+            from superlocalmemory.core.queue_consumer import QueueConsumer
+            from superlocalmemory.core.recall_queue import RecallQueue
+            _queue_db = _QP.home() / ".superlocalmemory" / "recall_queue.db"
+            _recall_queue = RecallQueue(_queue_db)
+            _queue_consumer = QueueConsumer(
+                queue=_recall_queue,
+                pool=WorkerPool.shared(),
+            )
+            _queue_consumer.start()
+            application.state.queue_consumer = _queue_consumer
+            application.state.recall_queue = _recall_queue
+            logger.info("QueueConsumer started (recall_queue.db)")
+        except Exception as _qc_exc:
+            logger.warning("QueueConsumer start failed (non-fatal): %s", _qc_exc)
+            application.state.queue_consumer = None
+            application.state.recall_queue = None
+
     except Exception as exc:
         logger.warning("Engine init failed: %s", exc)
         application.state.engine = None
@@ -570,6 +591,20 @@ async def lifespan(application: FastAPI):
                     pass
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("bandit_tasks cancel failed: %s", exc)
+
+    # v3.4.26: Stop QueueConsumer (recall_queue.db drainer).
+    _qc = getattr(application.state, "queue_consumer", None)
+    if _qc is not None:
+        try:
+            _qc.stop()
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("queue_consumer stop failed: %s", exc)
+    _rq = getattr(application.state, "recall_queue", None)
+    if _rq is not None:
+        try:
+            _rq.close()
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("recall_queue close failed: %s", exc)
 
     # Stop HealthMonitor (health_monitor.py owns a daemon thread).
     _health = getattr(application.state, "health_monitor", None)
