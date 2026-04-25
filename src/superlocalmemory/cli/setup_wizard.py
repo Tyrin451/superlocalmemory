@@ -335,7 +335,7 @@ def run_wizard(auto: bool = False) -> None:
     if choice == "c" and interactive:
         configure_provider(config)
     else:
-        config.save()
+        config.save(mode_change=True)
 
     mode_names = {"a": "Local Guardian", "b": "Smart Local", "c": "Full Power"}
     print(f"\n  ✓ Mode {choice.upper()} ({mode_names[choice]}) configured")
@@ -421,7 +421,7 @@ def run_wizard(auto: bool = False) -> None:
         config.daemon_idle_timeout = 0
         print("\n  ✓ 24/7 Always-On mode")
 
-    config.save()
+    config.save(mode_change=True)
 
     # -- Step 6: Mesh Communication (v3.4.3) --
     print()
@@ -441,7 +441,7 @@ def run_wizard(auto: bool = False) -> None:
         print("  Auto-enabling Mesh (non-interactive)")
 
     config.mesh_enabled = mesh_choice in ("", "y", "yes")
-    config.save()
+    config.save(mode_change=True)
     print(f"\n  ✓ Mesh {'enabled' if config.mesh_enabled else 'disabled'}")
 
     # -- Step 7: Ingestion Adapters (v3.4.3) --
@@ -502,7 +502,7 @@ def run_wizard(auto: bool = False) -> None:
         print("  Auto-enabling entity compilation (non-interactive)")
 
     config.entity_compilation_enabled = ec_choice in ("", "y", "yes")
-    config.save()
+    config.save(mode_change=True)
     print(f"\n  ✓ Entity compilation {'enabled' if config.entity_compilation_enabled else 'disabled'}")
 
     # -- Step 9: Skill Evolution (v3.4.11) --
@@ -661,7 +661,7 @@ def check_first_use(command: str) -> None:
             from superlocalmemory.core.config import SLMConfig
             from superlocalmemory.storage.models import Mode
             config = SLMConfig.for_mode(Mode.A)
-            config.save()
+            config.save(mode_change=True)
             _mark_complete()
         except Exception:
             pass
@@ -749,6 +749,6 @@ def configure_provider(config: object) -> None:
         llm_api_key=api_key,
         llm_api_base=preset["base_url"],
     )
-    updated.save()
+    updated.save(mode_change=True)
     print(f"  Provider: {provider_name}")
     print(f"  Model: {preset['model']}")

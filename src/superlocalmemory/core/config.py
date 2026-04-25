@@ -697,8 +697,25 @@ class SLMConfig:
 
         return config
 
-    def save(self, config_path: Path | None = None) -> None:
-        """Save config to JSON file."""
+    def save(
+        self,
+        config_path: Path | None = None,
+        *,
+        mode_change: bool = False,
+    ) -> None:
+        """Save config to JSON file.
+
+        v3.4.34: mode protection. If the existing config.json has a mode
+        that differs from ``self.mode`` and the caller did NOT pass
+        ``mode_change=True``, the EXISTING mode is preserved.  This
+        prevents accidental mode resets when code creates a fresh
+        ``SLMConfig()`` (defaults to Mode A) and calls ``save()`` to
+        persist an unrelated field change.
+
+        Callers that intentionally switch mode (``slm mode b``, the MCP
+        ``set_mode`` tool, the dashboard PUT ``/api/v3/mode``) MUST pass
+        ``mode_change=True``.
+        """
         import json
         path = config_path or (self.base_dir / "config.json")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -710,8 +727,19 @@ class SLMConfig:
             except (json.JSONDecodeError, OSError):
                 pass
 
+        # v3.4.34: mode protection — preserve user's mode unless explicitly changing
+        effective_mode = self.mode.value
+        existing_mode = existing.get("mode")
+        if existing_mode and existing_mode != effective_mode and not mode_change:
+            logger.warning(
+                "SLMConfig.save(): mode change blocked (%s → %s). "
+                "Pass mode_change=True to override. Preserving '%s'.",
+                existing_mode, effective_mode, existing_mode,
+            )
+            effective_mode = existing_mode
+
         data = {
-            "mode": self.mode.value,
+            "mode": effective_mode,
             "active_profile": self.active_profile,
             "llm": {
                 "provider": self.llm.provider,

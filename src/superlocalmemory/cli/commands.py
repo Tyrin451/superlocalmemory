@@ -639,7 +639,7 @@ def cmd_mode(args: Namespace) -> None:
                 llm_api_key=config.llm.api_key,
                 llm_api_base=config.llm.api_base,
             )
-            updated.save()
+            updated.save(mode_change=True)
             json_print("mode", data={
                 "previous_mode": old_mode, "current_mode": args.value.upper(),
             }, next_actions=[
@@ -661,7 +661,7 @@ def cmd_mode(args: Namespace) -> None:
             llm_api_key=config.llm.api_key,
             llm_api_base=config.llm.api_base,
         )
-        updated.save()
+        updated.save(mode_change=True)
         print(f"Mode set to: {args.value.upper()}")
 
         # V3.3: Check if embedding model changed — inform about re-indexing

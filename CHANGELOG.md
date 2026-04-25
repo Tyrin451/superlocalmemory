@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.34] - 2026-04-25
+
+Fix: user's mode choice can no longer be silently overwritten.
+
+### Fixed
+- **Mode protection in `SLMConfig.save()`.** Any `save()` call that would
+  change the mode in `config.json` is now blocked unless the caller passes
+  `mode_change=True`. This prevents accidental mode resets when code creates
+  a fresh `SLMConfig()` (defaults to Mode A) and calls `save()` to persist
+  an unrelated field change. A warning is logged when a silent mode change
+  is blocked.
+- **MCP `set_mode` preserves user settings.** Previously `set_mode` created
+  a fresh `SLMConfig.for_mode()` that lost all user customizations (LLM
+  provider, API keys, embedding config, active profile). Now carries forward
+  all settings from the existing config, matching the dashboard behavior.
+- All intentional mode-change paths (`slm mode`, MCP `set_mode`, dashboard
+  PUT `/api/v3/mode`, setup wizard) pass `mode_change=True`.
+
+---
+
 ## [3.4.33] - 2026-04-25
 
 Fix: daemon leaked SQLite connections to learning.db via bandit threadlocals.

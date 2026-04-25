@@ -136,7 +136,7 @@ async def set_mode(request: Request):
             embedding_dimension=old_config.embedding.dimension,
         )
         new_config.active_profile = old_config.active_profile
-        new_config.save()
+        new_config.save(mode_change=True)
 
         # Audit the change before we lose context — proves who/when/what.
         # Captures the phantom-write case where `for_mode(C)` auto-defaults
