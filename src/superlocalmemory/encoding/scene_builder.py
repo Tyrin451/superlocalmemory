@@ -56,6 +56,15 @@ class SceneBuilder:
         # Always compute fact embedding first — needed for comparisons
         fact_emb = self._embedder.embed(new_fact.content)
 
+        # v3.4.38: Defensive None guard. embedder.embed() returns None when
+        # the embedding worker is unavailable (timeout, crash). Without this
+        # guard, _cosine(None, theme_emb) → zip(None, ...) → 'NoneType'
+        # object is not iterable, propagating up to engine.store() and
+        # causing the entire memory to be lost. Better to skip scene
+        # assignment than lose the memory.
+        if fact_emb is None:
+            return self._create_scene(new_fact, profile_id)
+
         scenes = self._get_scenes(profile_id)
         if not scenes:
             return self._create_scene(new_fact, profile_id)
@@ -189,7 +198,12 @@ class SceneBuilder:
         )
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
+def _cosine(a: list[float] | None, b: list[float] | None) -> float:
+    # v3.4.38: Defensive None guard — embedder can return None on worker
+    # unavailability. Returning 0.0 is correct: zero similarity means no
+    # match, which falls back to creating a new scene.
+    if a is None or b is None:
+        return 0.0
     dot = sum(x * y for x, y in zip(a, b))
     na = sum(x * x for x in a) ** 0.5
     nb = sum(x * x for x in b) ** 0.5

@@ -122,13 +122,22 @@ def mark_done(row_id: int, base_dir: Path | None = None) -> None:
 
 
 def mark_failed(row_id: int, error: str, base_dir: Path | None = None) -> None:
-    """Mark a pending memory as failed with error message."""
+    """Mark a pending memory as failed with error message.
+
+    v3.4.38: Now retry-aware. If retry_count < _MAX_RETRIES, keeps status as
+    'pending' so the materializer will retry on next iteration. Only marks
+    permanently failed after _MAX_RETRIES (3) attempts. The previous behavior
+    permanently lost 18 memories between April 15-26, 2026 to transient errors.
+    """
     conn = _get_db(base_dir)
     try:
+        # Increment retry count and conditionally update status
         conn.execute(
-            "UPDATE pending_memories SET status = 'failed', error = ?, "
-            "retry_count = retry_count + 1 WHERE id = ?",
-            (error, row_id),
+            "UPDATE pending_memories SET error = ?, "
+            "retry_count = retry_count + 1, "
+            "status = CASE WHEN retry_count + 1 >= ? THEN 'failed' ELSE 'pending' END "
+            "WHERE id = ?",
+            (error, _MAX_RETRIES, row_id),
         )
         conn.commit()
     finally:

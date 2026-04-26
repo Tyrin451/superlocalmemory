@@ -167,6 +167,15 @@ def run_store(
         session_date=parsed_date, speaker_a=speaker,
     )
 
+    # v3.4.38: Defensive None guard. extract_facts() returns None on transient
+    # failures (embedding worker timeout, LLM call fail). Without this guard,
+    # line 201's `{f.content for f in facts}` raises 'NoneType' object is not
+    # iterable, causing the caller to mark_failed permanently — even though
+    # the content is still recoverable. 18 memories were lost to this between
+    # April 15-26, 2026.
+    if facts is None:
+        facts = []
+
     # V3.3.11: Also store raw content as a verbatim fact to preserve details
     # that fact extraction may abstract away (dates, names, specifics).
     # This ensures BM25 and semantic search can always find the original text.

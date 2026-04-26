@@ -148,6 +148,13 @@ from superlocalmemory.core.recall_gate import (
     in_flight as _recalls_in_flight,
 )
 
+# v3.4.38: Module-level engine reference for the pending materializer.
+# Set by the FastAPI lifespan after engine.initialize(). Was missing before,
+# causing "name '_engine' is not defined" errors that blocked materialization
+# of pending memories — they accumulated forever, only being processed at
+# daemon startup via engine._process_pending_memories().
+_engine = None
+
 
 # ---------------------------------------------------------------------------
 # Observation debounce buffer (migrated from daemon.py)
@@ -420,6 +427,9 @@ async def lifespan(application: FastAPI):
 
         application.state.engine = engine
         application.state.config = config
+        # v3.4.38: Wire module-level _engine for the pending materializer.
+        global _engine
+        _engine = engine
         logger.info("Unified daemon: MemoryEngine initialized (mode=%s)", config.mode.value)
 
         # LLD-07 §4 — deferred migrations (e.g. M006 reward column) need to
@@ -1378,16 +1388,31 @@ def _start_pending_materializer() -> None:
         from superlocalmemory.cli.pending_store import (
             get_pending, mark_done, mark_failed,
         )
+        # v3.4.38: log first engine acquisition so we know materializer is alive
+        _engine_logged = False
+        _waiting_logged = False
         while not _materializer_stop.is_set():
             try:
-                engine = _engine  # may be None briefly at startup
+                # v3.4.38: Read fresh module global on every iteration so we
+                # pick up the engine after lifespan sets it. Use the import
+                # trick to ensure we're reading the live module attribute,
+                # not a stale local reference.
+                import superlocalmemory.server.unified_daemon as _ud
+                engine = _ud._engine
                 if engine is None:
+                    if not _waiting_logged:
+                        logger.info("Materializer: waiting for engine to init...")
+                        _waiting_logged = True
                     time.sleep(2.0)
                     continue
+                if not _engine_logged:
+                    logger.info("Materializer: engine acquired, starting drain loop")
+                    _engine_logged = True
                 pending = get_pending(limit=5)
                 if not pending:
                     time.sleep(2.0)
                     continue
+                logger.info("Materializer: processing %d pending memories", len(pending))
                 for item in pending:
                     if _materializer_stop.is_set():
                         break

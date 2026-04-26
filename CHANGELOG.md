@@ -10,6 +10,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.38] - 2026-04-26
+
+**P0 silent data loss fix.** The async `/remember` pipeline was broken since
+v3.4.32 — memories were being marked "queued" and acknowledged but never
+actually persisting to memory.db during runtime. Only daemon-restart drained
+the pending queue (limit 20 per restart). 18 memories were permanently lost
+to a NoneType iterable crash between April 15-26, 2026, all recoverable
+because the content was preserved in pending.db.
+
+### Fixed
+- **Materializer `_engine` NameError** (`unified_daemon.py`). The background
+  pending materializer thread referenced a module-level `_engine` global
+  that was never declared. Result: every iteration threw `NameError: name
+  '_engine' is not defined`, the exception was caught and logged as
+  "materializer loop error", and the thread slept 5s and retried forever
+  without ever processing pending memories. Bug present since v3.4.32.
+  Fixed by declaring `_engine = None` at module level and assigning
+  `_engine = engine` in the FastAPI lifespan after `engine.initialize()`.
+- **scene_builder NoneType crash** (`encoding/scene_builder.py:assign_to_scene`).
+  When the embedding worker was unavailable (cold-start timeout, crash),
+  `embedder.embed()` returned None. The code checked `theme_emb is None`
+  but never checked `fact_emb is None`, so `_cosine(None, theme_emb)`
+  called `zip(None, theme_emb)` → `'NoneType' object is not iterable`,
+  propagating up through `engine.store()` → mark_failed → permanent loss.
+  Fixed by guarding `fact_emb is None` (skip scene assignment, still create
+  scene) and adding defensive `None` check to `_cosine()` itself.
+- **Retry-aware mark_failed** (`cli/pending_store.py`). Previously, ANY
+  exception during materialization permanently marked the memory as
+  failed — even transient errors like embedding worker timeout. Now uses
+  the existing `retry_count` column: keeps status as `pending` until 3
+  retries, only marks `failed` after all retries are exhausted.
+
+### Added
+- **Diagnostic logging in materializer** — "Materializer: waiting for
+  engine to init...", "engine acquired, starting drain loop", "processing
+  N pending memories" — so operators can verify the materializer is alive
+  without grepping for absence of error messages.
+- **`tests/test_integration/test_async_remember_e2e.py`** — full
+  production pipeline test: POST `/remember` (async, default mode) →
+  wait up to 60s → verify content in `memory.db` → recall returns it.
+  This is the test that was missing for 8+ months. The 4,501 existing
+  test functions test components in isolation (mocking `store_pending`)
+  and never exercise the full async flow that real users hit.
+
+### Recovery
+On install, if you have existing failed records in `pending.db`, they will
+be auto-retried on the next daemon restart by `engine._process_pending_memories()`.
+To manually recover, run:
+```python
+import sqlite3
+db = sqlite3.connect('~/.superlocalmemory/pending.db')
+db.execute("UPDATE pending_memories SET status='pending', retry_count=0, error=NULL WHERE status='failed'")
+db.commit()
+```
+Then `slm restart`.
+
+---
+
 ## [3.4.37] - 2026-04-26
 
 **P0 RAM fix.** Total SLM footprint reduced from ~14 GB peak to ~2.3 GB peak
